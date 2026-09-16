@@ -29,6 +29,12 @@
  *      {{PROJECT_REF_URL}}, so that tag and its percent-encoding are gone too;
  *      {{PROJECT_REF}} remains, in the body text.
  *
+ * {{DELIVERY_CONTACT}}
+ *   Completes the delivery-booking sentence, addressing the customer from the sender
+ *   ("calling me on ...") and falling back to the Customer Support Team when the sender
+ *   has no office phone. That fallback deliberately differs from the footer's, which
+ *   drops its phone instead - see buildDeliveryContact for why.
+ *
  * PHASE 2 TAGS
  *   {{INTRO_COPY}}      replaces the fixed sentence "Please find your bespoke
  *                       installation drawings attached", which stops being true once
@@ -49,11 +55,17 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.2.0';
+    var TEMPLATE_VERSION = '1.3.0';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
      * template markup exactly, so it is asserted at build time by buildBody().
+     *
+     * THE FOOTER DROPS ITS PHONE; THE DELIVERY LINE SUBSTITUTES ONE. The two rules look
+     * inconsistent, and the difference is deliberate - see buildDeliveryContact below.
+     * In short: this one is the sender's PERSONAL contact, for which there is no honest
+     * substitute, so it is dropped. The delivery line is about a COMPANY FUNCTION that
+     * somebody else really does perform, so it falls back to them.
      */
     var PHONE_CLAUSE = ' or {{SENDER_PHONE}}';
 
@@ -430,7 +442,7 @@ function (config) {
         '</table>',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
-        '<td valign="top" style="padding-right:10px;padding-bottom:20px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you haven\'t already booked your delivery, you can confirm your slot by calling our Customer Support Team on <a href="tel:01404540748" target="_blank" style="text-decoration:underline !important;color:#59315f !important;"><font style="color:#59315f;">01404 540748</font></a>.</span></p></div>',
+        '<td valign="top" style="padding-right:10px;padding-bottom:20px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you haven\'t already booked your delivery, you can confirm your slot by {{DELIVERY_CONTACT}}.</span></p></div>',
         '</td>',
         '</tr>',
         '</table>',
@@ -800,6 +812,65 @@ function (config) {
         'available using the buttons below.';
 
     /**
+     * The clause completing "...you can confirm your slot by ___."
+     *
+     * With a sender phone:  calling me on 01404 222333
+     * Without:              calling our Customer Support Team on 01404 540748
+     *
+     * WHY THIS FALLS BACK WHERE THE FOOTER DROPS. The footer's phone clause is removed
+     * entirely when the sender has no office phone (see PHONE_CLAUSE above), and it would
+     * be easy to read these two rules as an inconsistency to be tidied up. They are not.
+     *
+     *   - The FOOTER phone is the sender's PERSONAL contact - "contact your Project
+     *     Engineer, NAME, on ___". Nobody else can stand in for it. Substituting a
+     *     switchboard number there would be a small lie, and Phase 0 rejected exactly
+     *     that ("Your Account Manager" on the main number). So it is dropped, and the
+     *     sentence still reads correctly without it.
+     *
+     *   - This line is about BOOKING A DELIVERY, which the Customer Support Team
+     *     genuinely does. The fallback is not a substitute for the sender; it is the
+     *     correct destination for that task, and was the original wording of this line.
+     *     Dropping the sentence would leave a customer unable to book a delivery because
+     *     an employee record had an empty field - a worse outcome by far than a sentence
+     *     that is slightly less personal.
+     *
+     * The rule, if it is ever needed for a third case: substitute when the fallback is a
+     * real answer to the customer's question; drop when it would only be pretending.
+     *
+     * The sender's phone is whatever buildBody was given - already resolved once, by the
+     * sales rep / project engineer rules, for the footer. It is not resolved again here.
+     *
+     * @param {string} senderPhone  the sender's officephone, or '' 
+     * @returns {string} HTML for the clause, with no trailing full stop
+     */
+    function buildDeliveryContact(senderPhone) {
+        var phone = trimOrEmpty(senderPhone);
+
+        if (phone) {
+            return 'calling me on ' + buildTelLink(phone);
+        }
+
+        return 'calling our Customer Support Team on ' +
+               buildTelLink(config.CUSTOMER_SUPPORT_PHONE);
+    }
+
+    /**
+     * A phone number as a tel: link, styled as the template's own links are.
+     *
+     * The href keeps only digits and a leading +, because a tel: URI cannot carry the
+     * spaces a readable number is written with. The visible text keeps the number
+     * exactly as the employee record holds it.
+     */
+    function buildTelLink(phoneNumber) {
+        var visible = config.escapeHtml(trimOrEmpty(phoneNumber));
+        var dialable = trimOrEmpty(phoneNumber).replace(/[^0-9+]/g, '');
+
+        return '<a href="tel:' + config.escapeHtml(dialable) + '" target="_blank" ' +
+               'style="text-decoration:underline !important;color:#59315f !important;">' +
+               '<font style="color:#59315f;">' + visible + '</font></a>';
+    }
+
+    /**
      * Builds the CTA buttons for {{DOCUMENT_LINKS}}.
      *
      * The markup is copied from the CONFIRM DRAWINGS button that this template used to
@@ -894,7 +965,10 @@ function (config) {
      * @param {string} options.senderEmail  the address PRINTED in the body, which for
      *                                      a project engineer is the shared design
      *                                      mailbox and not their own address
-     * @param {string} options.senderPhone  officephone, or '' to drop the clause
+     * @param {string} options.senderPhone  officephone, or ''. Drives BOTH the footer
+     *                                       clause (dropped when blank) and the delivery
+     *                                       line (falls back when blank), from this one
+     *                                       already-resolved value.
      * @param {Array<Object>} options.documents  [{ label, url }] rendered as CTA buttons
      * @param {boolean} options.attachFiles  true when the files are also attached, which
      *                                       selects the body copy
@@ -917,6 +991,11 @@ function (config) {
             }
             html = replaceAll(html, PHONE_CLAUSE, '');
         }
+
+        // Generated markup (it carries a tel: link), so inserted as-is; its only variable
+        // part is a phone number, escaped inside buildTelLink.
+        html = replaceAll(html, '{{DELIVERY_CONTACT}}',
+            buildDeliveryContact(opts.senderPhone));
 
         html = replaceAll(html, '{{INTRO_COPY}}', config.escapeHtml(
             opts.attachFiles ? INTRO_COPY_LINKED_AND_ATTACHED : INTRO_COPY_LINKED));

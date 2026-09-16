@@ -441,3 +441,80 @@ label rules.
 Unchanged from Phase 2: the `File.url` question (b), retention now that links live in
 customers' mailboxes, and `{{PROJECT_REF}}`/subject wording. Added by 2a: whether the FILE
 field honours a row layout type, which is cosmetic either way.
+
+
+---
+---
+
+# Phase 2b — the delivery booking line
+
+| File | Version | Change |
+|---|---|---|
+| `lib/dsn_lib_config.js` | 1.2.0 → **1.3.0** | `CUSTOMER_SUPPORT_PHONE` constant |
+| `dsn_email_template.js` | 1.2.0 → **1.3.0** | `{{DELIVERY_CONTACT}}` and its builder |
+
+`node --check` passes on all six files.
+
+## What changed
+
+The delivery-booking sentence now addresses the customer from the sender:
+
+- **Sender has an office phone:** *"If you haven't already booked your delivery, you can
+  confirm your slot by calling me on 01404 222333."*
+- **Sender's office phone is blank:** *"...by calling our Customer Support Team on
+  01404 540748."*
+
+The phone is the one **already resolved for the footer** — the chosen sender's employee
+`officephone`, by the existing sales rep / project engineer rules. `buildBody` receives it
+once and both the footer clause and this line are built from that single value; nothing is
+looked up a second time.
+
+Both numbers come from config. `CUSTOMER_SUPPORT_PHONE` joins `SHARED_DESIGN_EMAIL` in
+`dsn_lib_config.js`, and neither now appears as a literal anywhere in the lifted markup —
+the harness asserts that against the `TEMPLATE_LINES` array specifically, so a number
+quoted in a comment cannot mask a number left in the HTML.
+
+The clause carries a `tel:` link styled exactly as the template's own links are. The href
+keeps only digits and a leading `+`, because a `tel:` URI cannot carry the spaces a
+readable number is written with; the visible text keeps the number exactly as the employee
+record holds it.
+
+## Why the two fallback rules differ — and why that is not an inconsistency
+
+This is recorded in the code beside **both** rules, because the next person to read them
+will see a contradiction and be tempted to make them agree.
+
+**The footer drops its phone.** *"...contact your Project Engineer, NAME, via
+design@nu-heat.co.uk or ___."* That number is the sender's **personal contact**. Nobody
+else can stand in for it, and substituting the switchboard would be a small lie — exactly
+the lie Phase 0 rejected when it removed Send Quote's "Your Account Manager" on the main
+number. So the clause is removed and the sentence still reads correctly.
+
+**The delivery line substitutes.** It is about **booking a delivery**, which the Customer
+Support Team genuinely does. The fallback is not a stand-in for the sender; it is the
+correct destination for that task, and was this line's original wording. Dropping the
+sentence would leave a customer unable to book a delivery because an employee record had
+an empty field — a far worse outcome than a sentence that is slightly less personal.
+
+The general rule, if a third case ever arises: **substitute when the fallback is a real
+answer to the customer's question; drop when it would only be pretending.**
+
+## Tests added
+
+| # | Scenario | Expected |
+|---|---|---|
+| 23 | Sender with an officephone | "calling me on <their number>" |
+| 24 | Sender with a blank officephone | Customer Support wording and number, sentence intact |
+| 25 | Same email, both cases | Footer and delivery line agree; no gap, stray "or", or empty bracket |
+
+Test 25 checks both variants of the whole rendered body for a stray `or .`, `on .`, empty
+brackets, doubled full stops, leading spaces before commas, and the strings `undefined` and
+`null` — the shapes a badly-handled blank value actually takes. It also confirms the
+opposite behaviours coexist correctly: with a phone, the footer shows it *and* the delivery
+line says "me"; with none, the footer drops its clause *while* the delivery line
+substitutes support.
+
+Verified end to end through the Suitelet as well as at the template, so the value really is
+the one the sender rules produced.
+
+**192 assertions across six suites, all passing.**
