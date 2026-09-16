@@ -14,7 +14,7 @@
  *
  * Script parameters on this record:
  *   custscript_dsn_salesrep_default_props - value proposition IDs defaulting to the
- *                                           sales rep
+ *                    sales rep
  *   custscript_dsn_attachment_folder      - File Cabinet folder for saved drawings
  *
  * HELPER LINEAGE
@@ -48,7 +48,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.5.1';
+    var SCRIPT_VERSION = '1.6.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -71,8 +71,8 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      * a default that is too narrow to read an email address or a button label in, so the
      * ones that carry real content are widened explicitly.
      */
-    var WIDTH_EMAIL_FIELD = 60;
-    var WIDTH_LABEL_FIELD = 45;
+    var WIDTH_EMAIL_FIELD = 32;
+    var WIDTH_LABEL_FIELD = 35;
     var WIDTH_FILE_FIELD  = 45;
 
     /** Sender candidate keys. The form posts one of these, never an employee ID: the
@@ -82,7 +82,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     var SENDER_PROJECT_ENGINEER = 'pe';
     var SENDER_CURRENT_USER = 'user';
 
-    // --- Entry point ---------------------------------------------------------
+    // --- Entry point ----
 
     function onRequest(context) {
         var opportunityId;
@@ -109,7 +109,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         }
     }
 
-    // --- GET: build the form -------------------------------------------------
+    // --- GET: build the form ----
 
     /**
      * @param {Object} context
@@ -118,7 +118,168 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      * @param {Array<string>} [options.errors] messages to show in a banner
      * @param {Object} [options.values] previously submitted sender/to/cc/bcc to restore
      */
+    /**
+     * Standalone HTML renderer. No native controls or NetSuite DOM selectors.
+     * Retains the existing POST field names and server-side send pipeline.
+     * Sandbox verification required for multipart handling and deployment security.
+     */
     function showForm(context, opportunityId, options) {
+        var opts = options || {};
+        var values = opts.values || {};
+        if (!opportunityId) {
+            showMessagePage(context, 'No Opportunity',
+                'Open Send Design from an Opportunity record.', '');
+            return;
+        }
+        var data = loadOpportunityContext(opportunityId);
+        if (!data.candidates.length) {
+            showMessagePage(context, 'No available sender',
+                'No sender could be resolved. Please check the execution log.', opportunityId);
+            return;
+        }
+
+        // Read the configured custom list; never hard-code category IDs or labels.
+        // Fail visibly rather than rendering an apparently valid empty dropdown.
+        var categories = [];
+        search.create({
+            type: config.LINK_CATEGORY_LIST,
+            columns: ['internalid', 'name']
+        }).run().each(function (result) {
+            categories.push({
+                id: String(result.getValue({ name: 'internalid' })),
+                name: String(result.getValue({ name: 'name' }) || '')
+            });
+            return true;
+        });
+
+        // Local escaping covers both HTML text and quoted attributes.
+        function esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        function attrs(id) {
+            return ' id="' + esc(id) + '" name="' + esc(id) + '"';
+        }
+        function option(value, text, selected, extra) {
+            return '<option value="' + esc(value) + '"' +
+                (String(value) === String(selected) ? ' selected' : '') +
+                (extra || '') + '>' + esc(text) + '</option>';
+        }
+        function textBox(id, title, value, required) {
+            return '<label>' + esc(title) + '<input type="text"' + attrs(id) +
+                ' value="' + esc(value) + '"' + (required ? ' required' : '') +
+                '></label>';
+        }
+
+        var backUrl = url.resolveRecord({
+            recordType: 'opportunity', recordId: opportunityId, isEditMode: false
+        });
+        var senderKey = values.senderKey || data.defaultSenderKey;
+        var html = [];
+        html.push('<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+            '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+            '<title>Send Design</title><style>' +
+            '*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#243444;font:14px Arial,sans-serif}' +
+            'main{padding:24px;width:100%}h1{margin:0 0 16px;font-size:26px}' +
+            'section{background:white;border:1px solid #d6dfe5;border-top:3px solid #00857d;border-radius:5px;padding:20px;margin:20px 0}' +
+            'h2{font-size:18px;color:#00776f;margin:0 0 12px}p{color:#526373;line-height:1.5}' +
+            '.grid{display:grid;gap:20px;margin:16px 0}.two{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+            '.three{grid-template-columns:repeat(3,minmax(0,1fr))}' +
+            'label{display:block;font-weight:600;min-width:0}' +
+            'input[type=text],select{display:block;width:100%;min-width:0;margin-top:7px;padding:9px;border:1px solid #aebdc8;border-radius:4px;background:white;font:inherit;color:inherit}' +
+            'input[type=file]{display:block;width:100%;min-width:0;font:inherit}' +
+            'input:focus,select:focus,a:focus,button:focus{outline:2px solid #00857d;outline-offset:2px}' +
+            '.scroll{overflow-x:auto}table{width:100%;min-width:850px;border-collapse:collapse;table-layout:fixed}' +
+            'th,td{text-align:left;padding:12px;border-bottom:1px solid #dce4e9;vertical-align:middle}' +
+            'thead{background:#eef5f5}tbody tr:nth-child(even){background:#f8fafb}' +
+            'td input[type=text],td select{margin:0}.actions{display:flex;gap:12px;align-items:center}' +
+            'button,.cancel{padding:10px 20px;border-radius:4px;border:1px solid #aebdc8;font:inherit;cursor:pointer;text-decoration:none}' +
+            'button{background:#007c74;color:white;border-color:#007c74}.cancel{background:white;color:#243444}' +
+            'button:disabled{opacity:.65;cursor:wait}.check{display:flex;gap:10px;align-items:center}' +
+            '.check input{margin:0}small{color:#657786}' +
+            '@media(max-width:760px){main{padding:12px}.two,.three{grid-template-columns:1fr}section{padding:14px}}' +
+            '</style></head><body><main><h1>Send Design</h1>');
+        html.push(buildNoticeHtml(data, opts.errors || []));
+        // Omitted action posts to the current Suitelet URL, retaining its routing query.
+        html.push('<form id="dsn-html-form" method="post" enctype="multipart/form-data">');
+        html.push('<input type="hidden"' + attrs(FLD.OPPORTUNITY_ID) +
+            ' value="' + esc(opportunityId) + '">');
+        html.push('<div class="actions"><button type="submit">Send Design</button>' +
+            '<a class="cancel" href="' + esc(backUrl) + '">Cancel</a>' +
+            '<small>v' + esc(SCRIPT_VERSION) + '</small></div>');
+        html.push('<section><h2>Email</h2><div class="grid two">' +
+            '<label>Send As<select' + attrs(FLD.SENDER) + ' required>');
+        data.candidates.forEach(function (candidate) {
+            html.push(option(candidate.key, buildSenderLabel(candidate), senderKey));
+        });
+        html.push('</select></label><label>Select Contact<select' + attrs(FLD.CONTACT) + '>');
+        html.push(option('', '-- Select a contact to fill To --', ''));
+        data.contacts.forEach(function (contact) {
+            html.push(option(contact.id, buildContactLabel(contact), '',
+                ' data-email="' + esc(contact.email || '') + '"'));
+        });
+        html.push('</select></label></div><div class="grid three">');
+        html.push(textBox(FLD.TO, 'To', values.to === undefined ? data.customerEmail : values.to, true));
+        html.push(textBox(FLD.CC, 'CC', values.cc || '', false));
+        html.push(textBox(FLD.BCC, 'BCC', values.bcc || '', false));
+        html.push('</div><p>Separate multiple addresses with commas.</p></section>');
+        html.push('<section><h2>Documents</h2><p>Choose a file, category and button label on each row. ' +
+            'You may use any of the ' + esc(config.ATTACHMENT_FIELD_COUNT) +
+            ' rows; unused rows can be left blank.</p><div class="scroll"><table>' +
+            '<colgroup><col style="width:12%"><col style="width:32%"><col style="width:24%"><col style="width:32%"></colgroup>' +
+            '<thead><tr><th scope="col">Document</th><th scope="col">File</th>' +
+            '<th scope="col">Category</th><th scope="col">Button Label</th></tr></thead><tbody>');
+        for (var i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
+            html.push('<tr><th scope="row">Document ' + i + '</th><td><input type="file"' +
+                attrs(FLD.FILE_PREFIX + i) + ' aria-label="Document ' + i + ' file"></td><td><select' +
+                attrs(FLD.CATEGORY_PREFIX + i) + ' data-label-target="' + esc(FLD.LABEL_PREFIX + i) +
+                '" aria-label="Document ' + i + ' category">');
+            var selected = slotValue(values, i, 'category');
+            html.push(option('', '-- Select category --', selected));
+            categories.forEach(function (category) {
+                html.push(option(category.id, category.name, selected));
+            });
+            html.push('</select></td><td><input type="text"' + attrs(FLD.LABEL_PREFIX + i) +
+                ' value="' + esc(slotValue(values, i, 'label')) + '" aria-label="Document ' + i +
+                ' button label" title="Choosing a category fills this label; edit it freely."></td></tr>');
+        }
+        html.push('</tbody></table></div></section><section><h2>Options</h2>' +
+            '<label class="check"><input type="checkbox"' + attrs(FLD.ATTACH_TOO) +
+            ' value="T"' + (values.attachToo ? ' checked' : '') +
+            '>Also attach the files to the email</label></section>' +
+            '<p id="dsn-submit-status" role="status"></p></form>');
+        // Only our own HTML is accessed. No hidden mirrors or N/currentRecord model.
+        html.push('<script>(function(){"use strict";' +
+            'var form=document.getElementById("dsn-html-form");' +
+            'var contact=document.getElementById(' + JSON.stringify(FLD.CONTACT) + ');' +
+            'contact.addEventListener("change",function(){' +
+                'var choice=this.options[this.selectedIndex];' +
+                'var address=choice?choice.getAttribute("data-email"):"";' +
+                'if(address){document.getElementById(' + JSON.stringify(FLD.TO) + ').value=address;}});' +
+            'form.querySelectorAll("select[data-label-target]").forEach(function(select){' +
+                'select.addEventListener("change",function(){if(!this.value){return;}' +
+                'document.getElementById(this.getAttribute("data-label-target")).value=this.options[this.selectedIndex].text;});});' +
+            'var submitting=false;form.addEventListener("submit",function(event){' +
+                'if(submitting){event.preventDefault();return;}' +
+                'var files=Array.from(form.querySelectorAll("input[type=file]"));' +
+                'if(!files.some(function(input){return input.files.length>0;})){' +
+                    'event.preventDefault();document.getElementById("dsn-submit-status").textContent="Please choose at least one drawing.";return;}' +
+                // Exclude empty multipart file parts, preserving non-sequential slots.
+                'files.forEach(function(input){input.disabled=input.files.length===0;});' +
+                'submitting=true;form.querySelector("button[type=submit]").disabled=true;' +
+                'document.getElementById("dsn-submit-status").textContent="Submitting. Please do not refresh or submit again.";});' +
+            'window.addEventListener("pageshow",function(){submitting=false;' +
+                'form.querySelector("button[type=submit]").disabled=false;' +
+                'form.querySelectorAll("input[type=file]").forEach(function(input){input.disabled=false;});' +
+                'document.getElementById("dsn-submit-status").textContent="";});' +
+            '})();</script></main></body></html>');
+        context.response.write(html.join(''));
+    }
+
+    // Retained temporarily for rollback/reference; no active callers.
+    function showNativeFormLegacy(context, opportunityId, options) {
         var opts = options || {};
         var values = opts.values || {};
         var errors = opts.errors || [];
@@ -158,11 +319,13 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
         noticeHtml = buildNoticeHtml(data, errors);
         if (noticeHtml) {
-            form.addField({
+            var noticeField = form.addField({
                 id:    FLD.NOTICE,
                 type:  serverWidget.FieldType.INLINEHTML,
                 label: ' '
-            }).defaultValue = noticeHtml;
+            });
+            noticeField.defaultValue = noticeHtml;
+            setRowLayout(noticeField, 'start');
         }
 
         addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
@@ -206,9 +369,8 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         setRowLayout(senderField, 'start');
         setRowLayout(contactField, 'end');
 
-        // Send As is the first field in the column flow, so this is where the balancing
-        // switch has to go. See disableFieldBalancing.
-        disableFieldBalancing(senderField);
+        // All visible controls now use OUTSIDE flow with explicit row breaks.
+        // Do not overwrite the sender's STARTROW break with STARTCOL.
 
         // Contact id -> email, for the client script to read when a contact is picked.
         // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
@@ -252,11 +414,13 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
         // Default UNTICKED: linking is the point of this feature, and attaching
         // reinstates the 10 MB per-file and 15 MB per-message limits.
-        form.addField({
+        var attachField = form.addField({
             id:    FLD.ATTACH_TOO,
             type:  serverWidget.FieldType.CHECKBOX,
             label: 'Also attach the files to the email'
-        }).defaultValue = values.attachToo ? 'T' : 'F';
+        });
+        attachField.defaultValue = values.attachToo ? 'T' : 'F';
+        setRowLayout(attachField, 'start');
 
         form.addSubmitButton({ label: 'Send Design' });
         form.addButton({
@@ -286,7 +450,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             }
             html.push('</ul>');
             html.push('<p style="margin:8px 0 0 0;">Please re-attach your drawings before ' +
-                      'submitting again - a browser cannot restore file selections.</p>');
+                    'submitting again - a browser cannot restore file selections.</p>');
             html.push('</div>');
         }
 
@@ -296,7 +460,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             html.push('<div style="border:2px solid #E35205; background:#fff8f2; padding:12px; margin-bottom:12px;">');
             html.push('<strong>This email will be sent from you.</strong> ');
             html.push('Neither a sales rep nor a project engineer is set on this ' +
-                      'Opportunity, so the sender has defaulted to your own user record. ');
+                    'Opportunity, so the sender has defaulted to your own user record. ');
             html.push('Check the <em>Send As</em> field before sending.');
             html.push('</div>');
         }
@@ -370,21 +534,24 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     }
 
     /**
-     * Positions a field within a row.
-     *
-     * Wrapped in try/catch because updateLayoutType is presentation only: a field type
-     * that refuses a layout must not take the whole form down with it. A refusal is
-     * logged once at debug, not at error - the form is still perfectly usable, just
-     * stacked rather than laid across.
+     * Keep every visible control in the same OUTSIDE flow as the headings.
+     * STARTROW is a BREAK type here, not a layout type. Only the first
+     * control in each row starts a new row; the next row closes the previous one.
+     * Native FILE rendering and column alignment require a sandbox UI test.
+     * Do not silently swallow a failure to apply the required layout.
      */
     function setRowLayout(field, position) {
-        var layoutTypes = {
-            start: serverWidget.FieldLayoutType.STARTROW,
-            mid:   serverWidget.FieldLayoutType.MIDROW,
-            end:   serverWidget.FieldLayoutType.ENDROW
-        };
-
-        setLayoutType(field, layoutTypes[position], 'row position "' + position + '"');
+        if (['start', 'mid', 'end'].indexOf(position) === -1) {
+            throw new Error('Unknown row position: ' + position);
+        }
+        field.updateLayoutType({
+            layoutType: serverWidget.FieldLayoutType.OUTSIDE
+        });
+        field.updateBreakType({
+            breakType: position === 'start'
+                ? serverWidget.FieldBreakType.STARTROW
+                : serverWidget.FieldBreakType.NONE
+        });
     }
 
     /**
@@ -594,7 +761,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         return field;
     }
 
-    // --- Reading the Opportunity ---------------------------------------------
+    // --- Reading the Opportunity ----
 
     /**
      * Everything the form and the send need from the Opportunity, resolved once.
@@ -632,8 +799,8 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             candidates:      candidates,
             defaultSenderKey: defaultKey,
             defaultedToCurrentUser: defaultKey === SENDER_CURRENT_USER &&
-                                    !findCandidate(candidates, SENDER_SALES_REP) &&
-                                    !findCandidate(candidates, SENDER_PROJECT_ENGINEER)
+                    !findCandidate(candidates, SENDER_SALES_REP) &&
+                    !findCandidate(candidates, SENDER_PROJECT_ENGINEER)
         };
     }
 
@@ -736,9 +903,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     /**
      * Default sender:
      *   value proposition in the parameter list -> sales rep
-     *   otherwise                               -> project engineer
+     *   otherwise                    -> project engineer
      *   project engineer blank                  -> sales rep
-     *   both blank                              -> current user
+     *   both blank                    -> current user
      *
      * Expressed as a preference order so that the case the brief does not name - value
      * proposition prefers the sales rep, but no sales rep is set - also has a defined
@@ -832,7 +999,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         return contacts;
     }
 
-    // --- POST: validate, save, send ------------------------------------------
+    // --- POST: validate, save, send ----
 
     function handleSubmit(context) {
         var params = context.request.parameters;
@@ -1452,7 +1619,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             ' | ' + options.attachments.length + ' attachment(s)');
     }
 
-    // --- Result pages --------------------------------------------------------
+    // --- Result pages ----
 
     function showSuccessPage(context, data, sender, submitted, savedFiles, senderEmailForBody) {
         var form = serverWidget.createForm({ title: 'Send Design - sent' });
@@ -1472,7 +1639,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             (sender.email ? ' (' + config.escapeHtml(sender.email) + ')' : '')));
         html.push(row('Printed in the email', config.escapeHtml(senderEmailForBody) +
             (sender.phone ? ' and ' + config.escapeHtml(sender.phone)
-                          : ' (no phone shown - the sender has no office phone recorded)')));
+                    : ' (no phone shown - the sender has no office phone recorded)')));
         html.push(row('To', config.escapeHtml(submitted.to)));
         html.push(row('CC', config.escapeHtml(submitted.cc) || '(none)'));
         html.push(row('BCC', config.escapeHtml(submitted.bcc) || '(none)'));
