@@ -29,6 +29,12 @@
  *   2. Nothing else. The CONFIRM DRAWINGS button still points at
  *      customer.support@nu-heat.co.uk and still carries {{PROJECT_REF}} in its subject.
  *
+ * PHASE 2 TAGS
+ *   {{INTRO_COPY}}      replaces the fixed sentence "Please find your bespoke
+ *                       installation drawings attached", which stops being true once
+ *                       nothing is attached. Two variants, selected by options.attachFiles.
+ *   {{DOCUMENT_LINKS}}  one branded CTA button per document, labelled by the user.
+ *
  * THE PHONE CLAUSE
  *   When the sender has no officephone the phrase " or {{SENDER_PHONE}}" is removed
  *   from the sentence before substitution, leaving
@@ -43,7 +49,7 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.0.0';
+    var TEMPLATE_VERSION = '1.1.0';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
@@ -399,10 +405,11 @@ function (config) {
         '</table>',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
-        '<td valign="top" style="padding-top:20px;padding-right:10px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">Please find your bespoke installation drawings attached.</span></p></div>',
+        '<td valign="top" style="padding-top:20px;padding-right:10px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">{{INTRO_COPY}}</span></p></div>',
         '</td>',
         '</tr>',
         '</table>',
+        '{{DOCUMENT_LINKS}}',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
         '<td valign="top" style="padding-right:10px;padding-left:10px;"><div><h3 style="font-family:Georgia, Times, Times New Roman, serif;font-size:15px;color:#000000;font-weight:normal;line-height:15px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:0px;text-align:left;padding:0;margin:0;">&nbsp;</h3></div>',
@@ -838,6 +845,104 @@ function (config) {
     ];
 
     /**
+     * Body copy for the paragraph that used to read "Please find your bespoke
+     * installation drawings attached." That sentence is untrue once nothing is
+     * attached, so there are two variants and the caller picks by the checkbox.
+     */
+    var INTRO_COPY_LINKED =
+        'Your bespoke installation drawings are ready. Please use the buttons below to ' +
+        'open each document.';
+
+    var INTRO_COPY_LINKED_AND_ATTACHED =
+        'Please find your bespoke installation drawings attached. They are also ' +
+        'available using the buttons below.';
+
+    /**
+     * Builds the CTA buttons for {{DOCUMENT_LINKS}}.
+     *
+     * The markup is copied from the CONFIRM DRAWINGS button in this same template,
+     * INCLUDING its MSO conditional pair:
+     *
+     *   <!--[if !mso]><!-- -->   ... anchor-wrapped table, for everything else
+     *   <!--<![endif]-->
+     *   <div style="display:none; mso-hide: none;">  ... the Outlook fallback
+     *
+     * Both halves are required. Without the conditional, Outlook renders BOTH and the
+     * button appears twice - which is why the pattern is in the original template, and
+     * why it is reproduced here rather than simplified.
+     *
+     * @param {Array<Object>} documents  [{ label, url }]
+     * @returns {string} HTML, or '' when there are no documents
+     */
+    function buildDocumentLinks(documents) {
+        var html = [];
+        var i;
+        var label;
+        var href;
+
+        if (!documents || documents.length === 0) { return ''; }
+
+        html.push('<table cellpadding="0" cellspacing="0" border="0" width="100%">');
+
+        for (i = 0; i < documents.length; i++) {
+            // The label is user-entered free text and goes into element content.
+            label = config.escapeHtml(trimOrEmpty(documents[i].label));
+
+            // The URL goes into an href. It is HTML-escaped - which turns the query
+            // string's "&" into "&amp;" as an href requires - and NOT percent-encoded:
+            // File.url is already a URL with an already-encoded query string, so
+            // encoding it again would corrupt every link.
+            href = config.escapeHtml(trimOrEmpty(documents[i].url));
+
+            html.push('<tr>');
+            html.push('<td valign="top" align="center" style="padding-right:20px;padding-bottom:12px;padding-left:20px;">');
+
+            // Everything except Outlook.
+            html.push('<!--[if !mso]><!-- -->');
+            html.push('<a href="' + href + '" style="display:inline-block; text-decoration:none;" class="fluid-on-mobile">');
+            html.push('<span>');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<tr>');
+            html.push('<td align="center" style="padding:15px;">');
+            html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
+            html.push('<font style="color:#3e3b39;" class="button">');
+            html.push('<span><strong>' + label + '</strong></span>');
+            html.push('</font>');
+            html.push('</span>');
+            html.push('</td>');
+            html.push('</tr>');
+            html.push('</table>');
+            html.push('</span>');
+            html.push('</a>');
+            html.push('<!--<![endif]-->');
+
+            // Outlook only.
+            html.push('<div style="display:none; mso-hide: none;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<tr>');
+            html.push('<td align="center" style="padding:15px;">');
+            html.push('<a href="' + href + '" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">');
+            html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
+            html.push('<font style="color:#3e3b39;" class="button">');
+            html.push('<span><strong>' + label + '</strong></span>');
+            html.push('</font>');
+            html.push('</span>');
+            html.push('</a>');
+            html.push('</td>');
+            html.push('</tr>');
+            html.push('</table>');
+            html.push('</div>');
+
+            html.push('</td>');
+            html.push('</tr>');
+        }
+
+        html.push('</table>');
+
+        return html.join('\n');
+    }
+
+    /**
      * Builds the email body.
      *
      * @param {Object} options
@@ -848,6 +953,9 @@ function (config) {
      *                                      a project engineer is the shared design
      *                                      mailbox and not their own address
      * @param {string} options.senderPhone  officephone, or '' to drop the clause
+     * @param {Array<Object>} options.documents  [{ label, url }] rendered as CTA buttons
+     * @param {boolean} options.attachFiles  true when the files are also attached, which
+     *                                       selects the body copy
      * @returns {string} the complete HTML body
      */
     function buildBody(options) {
@@ -874,6 +982,13 @@ function (config) {
         // it is only HTML-escaped, so the URL occurrences are percent-encoded instead.
         html = replaceAll(html, '{{PROJECT_REF_URL}}',
             config.escapeHtml(encodeURIComponent(trimOrEmpty(opts.projectRef))));
+        html = replaceAll(html, '{{INTRO_COPY}}', config.escapeHtml(
+            opts.attachFiles ? INTRO_COPY_LINKED_AND_ATTACHED : INTRO_COPY_LINKED));
+
+        // Generated markup, so it is inserted as-is. Its user-supplied parts - the
+        // labels - are escaped inside buildDocumentLinks, not here.
+        html = replaceAll(html, '{{DOCUMENT_LINKS}}', buildDocumentLinks(opts.documents));
+
         html = replaceAll(html, '{{PROJECT_REF}}', config.escapeHtml(opts.projectRef));
         html = replaceAll(html, '{{SENDER_ROLE}}', config.escapeHtml(opts.senderRole));
         html = replaceAll(html, '{{SENDER_NAME}}', config.escapeHtml(opts.senderName));
@@ -908,8 +1023,9 @@ function (config) {
     }
 
     return {
-        TEMPLATE_VERSION: TEMPLATE_VERSION,
-        buildBody:        buildBody
+        TEMPLATE_VERSION:    TEMPLATE_VERSION,
+        buildBody:           buildBody,
+        buildDocumentLinks:  buildDocumentLinks
     };
 
 });
