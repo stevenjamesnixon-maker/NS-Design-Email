@@ -575,20 +575,38 @@ Read the sender's email and phone from the **Employee** record: `email` and
 `custbodycustbody_pe_email`, and do not fall back to them.
 
 One source of truth. The employee record is maintained once per person and is correct on
-every Opportunity thereafter. A per-Opportunity copy has to be right thousands of times
-over, and drifts silently the moment someone changes desk or number — every historical
-record keeps the stale value, and nothing flags it.
+every Opportunity thereafter.
 
-> Worth knowing before the first send: **`officephone` and `phone` are different fields
-> on the Employee record**, and Send Quote reads `phone` (Part 1b). Anyone whose number
-> is recorded only in `phone` will show **no phone at all** in a design email. That is
-> the visible gap working as designed — but if it turns out to be most of the team, the
-> fix is to populate `officephone` on the employee records, not to add a fallback here.
-> Worth a quick look at the employee data before go-live.
+**`officephone` alone. There is no fallback.** The client has confirmed `officephone` is
+populated on the employee records, so the field is read directly and nothing is read if
+it is empty. This closes what was previously left pending here.
 
-If `officephone` is blank, **drop the phone clause** rather than substituting the
-Opportunity field. A visible gap gets fixed on the employee record, which fixes it
-everywhere at once. A quietly-substituted stale number never gets fixed at all.
+If `officephone` is blank, **drop the phone clause.** A visible gap gets fixed on the
+employee record, which fixes it everywhere at once. A quietly-substituted value never
+gets fixed at all.
+
+> **The rejected fallback and the acceptable one were never the same thing**, and the
+> distinction is worth keeping even though this decision no longer turns on it — it
+> governs the next decision of this kind.
+>
+> A fallback from `officephone` to `phone` would have been **acceptable in principle**:
+> both live on the employee record, both are maintained in the one place, and either
+> value is corrected for every Opportunity at once. It was not needed, so it is not
+> there — but had `officephone` been patchy, that is the direction the fallback should
+> have gone.
+>
+> A fallback to `custbody_pe_phone` on the Opportunity would **not** have been
+> acceptable at any point. A per-Opportunity copy has to be right thousands of times
+> over and drifts silently the moment someone changes desk or number; every historical
+> record keeps the stale value and nothing flags it. The objection is to the *second
+> source of truth*, not to fallbacks as such.
+
+> **Send Quote reads `phone`, not `officephone`** (Part 1b). That is not a defect in this
+> repository and it is not ours to change. It is recorded because it has one visible
+> consequence: if a design email ever shows no phone while the quote email for the same
+> person shows one, **this difference is the reason** — their number is in `phone` and
+> not in `officephone`. The fix is to populate `officephone` on that employee record, not
+> to add a fallback here.
 
 > **`custbodycustbody_pe_email` has a doubled prefix.** That is the **stored field ID**,
 > not a typo in this document. Someone typed `custbody_pe_email` into the ID box and
@@ -709,8 +727,8 @@ The Decisions section above settles most of what was open. What remains:
   presentation, email field pattern, contact dropdown keying, File Cabinet saving,
   attachment-size handling, and the email template approach — all in Decisions above.
 - Whether a PE phone override exists is now **moot**: the override fields are
-  deliberately unused, and the phone comes from the Employee record's `officephone` or
-  is omitted.
+  deliberately unused, and the phone comes from the Employee record's `officephone`
+  alone — confirmed populated by the client — or is omitted.
 - Whether the button appears in EDIT mode — **no**, VIEW only.
 - Total attachment size is **not** a design constraint; only the per-file 10 MB ceiling
   is enforced.
