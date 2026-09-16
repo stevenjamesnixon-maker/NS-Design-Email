@@ -518,3 +518,106 @@ Verified end to end through the Suitelet as well as at the template, so the valu
 the one the sender rules produced.
 
 **192 assertions across six suites, all passing.**
+
+
+---
+
+## Phase 2b remainder — stacked form sections, full-width buttons
+
+Layout only. No logic, validation, publishing or send behaviour changed.
+
+| File | Version | Change |
+|---|---|---|
+| `dsn_email_template.js` | 1.3.0 → **1.4.0** | Buttons are the email's content width, reusing the hero image's classes |
+| `dsn_sl_send_design.js` | 1.3.0 → **1.4.0** | Section headings span the full form width; Email rows regrouped |
+
+`node --check` passes on all six files.
+
+### The form
+
+**Section headings now use `OUTSIDEABOVE`.** This is the change that matters. Previously
+they were ordinary in-grid fields, so NetSuite placed each one into whichever of its three
+columns the flow had reached — which is exactly why headings appeared mid-column and
+sections split across columns. `OUTSIDEABOVE` renders a field across the full form width,
+outside the column grid, which both puts the heading where it belongs and breaks the column
+flow at that point so the next section starts below rather than beside.
+
+**Email rows regrouped** to the briefed shape: `Send As | Select Contact | To` on one row,
+`CC | BCC` on the row below. Document rows are unchanged — `file | category | label`, one
+row each, all ten.
+
+**`STARTCOL` is not used anywhere**, nor is `updateBreakType`. The harness asserts their
+absence, since reaching for them is the obvious wrong turn if the stacking still misbehaves.
+
+`setRowLayout` now delegates to a shared `setLayoutType`, so the heading's `OUTSIDEABOVE`
+gets the same try/catch as the row positions: layout is presentation only, and a field type
+that refuses one must not take the form down. Refusals log at `debug`.
+
+### What I am NOT confident will render as intended
+
+Worth reading before looking at the Sandbox page, because these are the parts to check
+rather than the parts to trust:
+
+1. **Whether `OUTSIDEABOVE` alone is enough to stop the column flow.** It is documented as
+   rendering the field across the full width, and it is the right lever — but whether
+   NetSuite then *resumes* three-column flow for the fields after it, or treats the
+   full-width field as a section break, is not something the documentation states. This is
+   the single thing most likely to come back still wrong. If sections still split, the next
+   thing to try is `OUTSIDEBELOW` on the heading instead, which may anchor the following
+   fields differently.
+2. **Whether explicit `STARTROW`/`ENDROW` on every field is enough to stop NetSuite
+   inserting its own column breaks between rows.** Every field now has an explicit position
+   and nothing is left to automatic flow, which should prevent it. "Should" is doing work in
+   that sentence.
+3. **Whether the FILE field honours `STARTROW` at all** — still open from Phase 2a, still
+   handled by the try/catch, and still acceptable if it degrades to file-on-its-own-line
+   with category and label beside it. Not fought.
+4. **How a 10-row form of `OUTSIDEABOVE` headings actually looks.** Four full-width bars
+   down a long page may read well or may read as clutter. That is a judgement call best made
+   looking at it.
+
+The harness can prove which layout type each field was given, and does. It cannot prove what
+NetSuite's renderer does with them, and no stub can.
+
+### The email buttons
+
+Buttons are now the email's **full content width**, matching the hero image above them,
+rather than a fixed 280px.
+
+They reuse the template's own classes rather than inventing a size — `width600`
+(600px desktop, 100% below 599px, the hero image's own class) and `fluid-on-mobile`
+(100% on mobile). So the buttons track the image at both sizes, and if the template's
+content width ever changes the buttons follow without being touched.
+
+Kept as before: the width as **both** a `width` attribute and a CSS `width` so Outlook and
+everything else agree, `max-width:100%` so the mobile rules can win, centred labels,
+`word-wrap:break-word` so a long label wraps, and the MSO conditional pair on every button.
+
+Two supporting changes the brief did not name but the result needs:
+
+- **The anchor is `display:block`, not `display:inline-block`.** An inline-block anchor
+  shrink-wraps its contents, so the button would not have filled the width regardless of
+  what the table inside it said.
+- **The button cell's horizontal padding is removed.** The hero image's cell has none, so
+  20px of side padding would have left every button visibly narrower than the image it is
+  supposed to match.
+
+Equal width now comes for free: every button is the content width, so no label can make one
+wider than another.
+
+### Tests added
+
+| # | Scenario | Expected |
+|---|---|---|
+| 20 | Form loads | Email, Documents, More documents and Options stack in order, each heading full width, no section split across columns |
+| 21 | Three buttons, very different label lengths | All the same width as the hero image, long label wrapping within the button |
+| 22 | Email at phone width | Buttons and image both full width, still matching |
+
+Test 20 checks the layout type given to every field, the page order of all four headings and
+their sections, that starts and ends balance across all twelve rows, and that `STARTCOL`
+and `updateBreakType` appear nowhere. Test 22 checks the CSS rules the image relies on and
+that the buttons carry the same classes, which is the closest a harness can get to a phone.
+
+**221 assertions across seven suites, all passing.** Three Phase 2a assertions were updated
+where this change deliberately superseded them — the 280px width, the Email row split, and a
+renamed log message.

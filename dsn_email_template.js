@@ -55,7 +55,7 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.3.0';
+    var TEMPLATE_VERSION = '1.4.0';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
@@ -795,17 +795,24 @@ function (config) {
         'open each document.';
 
     /**
-     * Fixed button width, in pixels.
+     * Document buttons are the email's full content width - the same width as the hero
+     * image above them - rather than a width of their own.
      *
-     * Every document button is this wide whatever its label says, so a column of them
-     * lines up instead of stepping in and out with the label length. A long label wraps
-     * onto a second line and the button grows taller; it never grows wider. Matching
-     * widths read as a set, matching heights do not.
+     * This reuses the template's OWN classes rather than inventing a size:
+     *   .width600         600px on desktop, 100% below 599px  (the hero image's class)
+     *   .fluid-on-mobile  100% on mobile
+     * so the buttons track the image at both sizes, and if the template's content width
+     * ever changes the buttons follow it without being touched.
      *
-     * Applied as BOTH a width attribute and a CSS width: Outlook honours the attribute,
-     * most other clients the style, and older clients ignoring both still get a button.
+     * The pixel value is still written as BOTH a width attribute and a CSS width, because
+     * Outlook honours the attribute and most other clients the style; max-width:100% lets
+     * the mobile rules take over. Equal width then comes for free - every button is the
+     * content width, so no label can make one wider than another.
      */
-    var BUTTON_WIDTH_PX = 280;
+    var CONTENT_WIDTH_PX = 600;
+
+    /** The classes the hero image uses, so the buttons match it at every size. */
+    var FULL_WIDTH_CLASSES = 'width600 fluid-on-mobile';
 
     var INTRO_COPY_LINKED_AND_ATTACHED =
         'Please find your bespoke installation drawings attached. They are also ' +
@@ -908,15 +915,17 @@ function (config) {
             href = config.escapeHtml(trimOrEmpty(documents[i].url));
 
             html.push('<tr>');
-            html.push('<td valign="top" align="center" style="padding-right:20px;padding-bottom:12px;padding-left:20px;">');
+            // No horizontal padding: the hero image's cell has none either, so the
+            // button lines up with the image edge for edge rather than sitting inset.
+            html.push('<td valign="top" align="center" style="padding-bottom:12px;">');
 
             // Everything except Outlook.
             html.push('<!--[if !mso]><!-- -->');
-            html.push('<a href="' + href + '" style="display:inline-block; text-decoration:none; width:' + BUTTON_WIDTH_PX + 'px;" class="fluid-on-mobile">');
+            html.push('<a href="' + href + '" style="display:block; text-decoration:none; width:' + CONTENT_WIDTH_PX + 'px; max-width:100%;" class="' + FULL_WIDTH_CLASSES + '">');
             html.push('<span>');
-            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + BUTTON_WIDTH_PX + '" bgcolor="#ffb500" class="fluid-on-mobile" style="width:' + BUTTON_WIDTH_PX + 'px;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + CONTENT_WIDTH_PX + '" bgcolor="#ffb500" class="' + FULL_WIDTH_CLASSES + '" style="width:' + CONTENT_WIDTH_PX + 'px;max-width:100%;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
             html.push('<tr>');
-            html.push('<td align="center" width="' + BUTTON_WIDTH_PX + '" style="width:' + BUTTON_WIDTH_PX + 'px;padding:15px;text-align:center;word-wrap:break-word;">');
+            html.push('<td align="center" style="padding:15px;text-align:center;word-wrap:break-word;">');
             html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
             html.push('<font style="color:#3e3b39;" class="button">');
             html.push('<span><strong>' + label + '</strong></span>');
@@ -931,9 +940,9 @@ function (config) {
 
             // Outlook only.
             html.push('<div style="display:none; mso-hide: none;">');
-            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + BUTTON_WIDTH_PX + '" bgcolor="#ffb500" class="fluid-on-mobile" style="width:' + BUTTON_WIDTH_PX + 'px;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + CONTENT_WIDTH_PX + '" bgcolor="#ffb500" class="' + FULL_WIDTH_CLASSES + '" style="width:' + CONTENT_WIDTH_PX + 'px;max-width:100%;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
             html.push('<tr>');
-            html.push('<td align="center" width="' + BUTTON_WIDTH_PX + '" style="width:' + BUTTON_WIDTH_PX + 'px;padding:15px;text-align:center;word-wrap:break-word;">');
+            html.push('<td align="center" style="padding:15px;text-align:center;word-wrap:break-word;">');
             html.push('<a href="' + href + '" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">');
             html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
             html.push('<font style="color:#3e3b39;" class="button">');

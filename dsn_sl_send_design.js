@@ -48,7 +48,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.2.0';
+    var SCRIPT_VERSION = '1.4.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -198,7 +198,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         }
 
         setRowLayout(senderField, 'start');
-        setRowLayout(contactField, 'end');
+        setRowLayout(contactField, 'mid');
 
         // Contact id -> email, for the client script to read when a contact is picked.
         // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
@@ -207,11 +207,12 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         addHiddenLongText(form, FLD.CONTACT_MAP, 'Contact Emails',
             buildContactEmailMap(data.contacts));
 
-        // --- Recipients: ordinary visible fields, laid across one row ---
+        // --- Recipients: ordinary visible fields ---
+        // To closes the row opened by Send As; CC and BCC form the row below it.
         setRowLayout(addVisibleText(form, FLD.TO, 'To',
             values.to === undefined ? data.customerEmail : values.to,
-            'Separate multiple addresses with commas.'), 'start');
-        setRowLayout(addVisibleText(form, FLD.CC, 'CC', values.cc || '', ''), 'mid');
+            'Separate multiple addresses with commas.'), 'end');
+        setRowLayout(addVisibleText(form, FLD.CC, 'CC', values.cc || '', ''), 'start');
         setRowLayout(addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '', ''), 'end');
 
         // --- Documents: file, category and link label per slot ---
@@ -363,14 +364,25 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             end:   serverWidget.FieldLayoutType.ENDROW
         };
 
-        if (!field) { return; }
+        setLayoutType(field, layoutTypes[position], 'row position "' + position + '"');
+    }
+
+    /**
+     * Applies a layout type, guarded.
+     *
+     * Layout is presentation only, so a field type that refuses one must not take the
+     * whole form down with it. A refusal is logged at debug, not error: the form is still
+     * perfectly usable, just laid out differently from the intent.
+     */
+    function setLayoutType(field, layoutType, description) {
+        if (!field || !layoutType) { return; }
 
         try {
-            field.updateLayoutType({ layoutType: layoutTypes[position] });
+            field.updateLayoutType({ layoutType: layoutType });
         } catch (e) {
-            log.debug('dsn_sl_send_design.setRowLayout',
-                'Could not set layout type "' + position + '": ' + e.message +
-                ' - the field will stack instead, which is cosmetic only.');
+            log.debug('dsn_sl_send_design.setLayoutType',
+                'Could not apply ' + description + ': ' + e.message +
+                ' - the field will fall back to the default flow, which is cosmetic only.');
         }
     }
 
@@ -383,8 +395,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      * way.
      */
     function addSectionHeading(form, key, title, blurb) {
+        var field;
         var html = '<div style="border-top:2px solid #00857D; margin:18px 0 6px 0; ' +
-                   'padding-top:8px;">' +
+                   'padding-top:8px; width:100%;">' +
                    '<span style="font-size:15px; font-weight:600; color:#00857D;">' +
                    config.escapeHtml(title) + '</span>';
 
@@ -394,11 +407,22 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         }
         html = html + '</div>';
 
-        form.addField({
+        field = form.addField({
             id:    FLD.HEADING_PREFIX + key,
             type:  serverWidget.FieldType.INLINEHTML,
             label: ' '
-        }).defaultValue = html;
+        });
+        field.defaultValue = html;
+
+        // OUTSIDEABOVE renders the field across the FULL form width, outside NetSuite's
+        // column grid. Without it a heading is placed into whichever of the three columns
+        // the flow has reached, which is what was landing section headings mid-page and
+        // splitting a section across columns. Spanning the full width also breaks the
+        // column flow at that point, so the next section starts below rather than beside.
+        setLayoutType(field, serverWidget.FieldLayoutType.OUTSIDEABOVE,
+            'section heading "' + title + '"');
+
+        return field;
     }
 
     /**
