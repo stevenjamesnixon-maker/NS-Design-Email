@@ -11,7 +11,7 @@
  *              From 1.6.0 the GET renders a hand-written HTML page rather than a
  *              serverWidget form. See docs/phase-2-links.md, attempt 5 - in particular
  *              the multipart upload risk that change reintroduces.
- * @version     1.6.0
+ * @version     1.6.1
  *
  * Script ID:      customscript_dsn_sl_send_design
  * Deployment ID:  customdeploy_dsn_sl_send_design
@@ -52,7 +52,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.6.0';
+    var SCRIPT_VERSION = '1.6.1';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -70,14 +70,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         HEADING_PREFIX:  'custpage_dsn_heading_'
     };
 
-    /**
-     * Display widths, in characters, for the text inputs. NetSuite sizes a TEXT field to
-     * a default that is too narrow to read an email address or a button label in, so the
-     * ones that carry real content are widened explicitly.
-     */
-    var WIDTH_EMAIL_FIELD = 32;
-    var WIDTH_LABEL_FIELD = 35;
-    var WIDTH_FILE_FIELD  = 45;
 
     /** Sender candidate keys. The form posts one of these, never an employee ID: the
      *  candidates are re-resolved from the record on POST rather than trusted from the
@@ -206,7 +198,19 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             '@media(max-width:760px){main{padding:12px}.two,.three{grid-template-columns:1fr}section{padding:14px}}' +
             '</style></head><body><main><h1>Send Design</h1>');
         html.push(buildNoticeHtml(data, opts.errors || []));
-        // Omitted action posts to the current Suitelet URL, retaining its routing query.
+
+        // KNOWN DEPENDENCY: the form has no action, so the browser posts to the CURRENT
+        // URL including its query string - which is what carries script and deploy and
+        // routes the POST back to this Suitelet.
+        //
+        // That works, and uploads are confirmed working in Sandbox through it. But it
+        // depends on the address bar rather than on anything this page states, so it would
+        // break if the page were ever reached by a redirect that dropped the query.
+        //
+        // Deliberately NOT defended against with an explicit action: that failure is loud
+        // and already handled - without an opportunityId the POST lands on the "No
+        // Opportunity ... nothing was sent" page - so a defence is not justified. Recorded
+        // so the cause is obvious if it ever happens.
         html.push('<form id="dsn-html-form" method="post" enctype="multipart/form-data">');
         html.push('<input type="hidden"' + attrs(FLD.OPPORTUNITY_ID) +
             ' value="' + esc(opportunityId) + '">');
@@ -255,6 +259,19 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             '>Also attach the files to the email</label></section>' +
             '<p id="dsn-submit-status" role="status"></p></form>');
         // Only our own HTML is accessed. No hidden mirrors or N/currentRecord model.
+        //
+        // RULE: NO USER DATA GOES IN THIS SCRIPT BLOCK. Everything interpolated below is a
+        // hard-coded field ID via JSON.stringify. The script reaches user values through
+        // DOM property reads instead - getAttribute("data-email") and options[i].text -
+        // which do no parsing and cannot execute anything.
+        //
+        // This is deliberate, not luck, and it is the reason the escaping review came back
+        // clean. esc() is an HTML escaper, and HTML escaping does NOT make a value safe
+        // inside a <script> element: a category or label containing "</script>" would end
+        // the block early and everything after it would be parsed as markup. Escaped or
+        // not. If you ever need a server value in here, serialise it with JSON.stringify
+        // AND neutralise "</" - or better, put it in a data- attribute and read it, as the
+        // two behaviours below do.
         html.push('<script>(function(){"use strict";' +
             'var form=document.getElementById("dsn-html-form");' +
             'var contact=document.getElementById(' + JSON.stringify(FLD.CONTACT) + ');' +
@@ -280,162 +297,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
                 'document.getElementById("dsn-submit-status").textContent="";});' +
             '})();</script></main></body></html>');
         context.response.write(html.join(''));
-    }
-
-    // Retained temporarily for rollback/reference; no active callers.
-    function showNativeFormLegacy(context, opportunityId, options) {
-        var opts = options || {};
-        var values = opts.values || {};
-        var errors = opts.errors || [];
-        var data;
-        var form;
-        var senderField;
-        var contactField;
-        var toField;
-        var ccField;
-        var bccField;
-        var noticeHtml;
-        var defaultSenderKey;
-        var i;
-
-        if (!opportunityId) {
-            showMessagePage(context, 'No Opportunity',
-                'No Opportunity ID was supplied. Please open this page using the ' +
-                'Send Design button on an Opportunity record.', '');
-            return;
-        }
-
-        data = loadOpportunityContext(opportunityId);
-
-        if (data.candidates.length === 0) {
-            // Unreachable in practice - the current user is always a candidate - but a
-            // form with an empty sender list would send from nobody.
-            showMessagePage(context, 'No available sender',
-                'No sender could be resolved for this Opportunity. The sales rep, the ' +
-                'project engineer and the current user all failed to load. Please check ' +
-                'the execution log.', opportunityId);
-            return;
-        }
-
-        form = serverWidget.createForm({ title: 'Send Design' });
-
-        defaultSenderKey = values.senderKey || data.defaultSenderKey;
-
-        noticeHtml = buildNoticeHtml(data, errors);
-        if (noticeHtml) {
-            var noticeField = form.addField({
-                id:    FLD.NOTICE,
-                type:  serverWidget.FieldType.INLINEHTML,
-                label: ' '
-            });
-            noticeField.defaultValue = noticeHtml;
-            setRowLayout(noticeField, 'start');
-        }
-
-        addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
-
-        addSectionHeading(form, 'email', 'Email',
-            'Who the email comes from, and who it goes to.');
-
-        // --- Sender ---
-        senderField = form.addField({
-            id:    FLD.SENDER,
-            type:  serverWidget.FieldType.SELECT,
-            label: 'Send As'
-        });
-        senderField.isMandatory = true;
-        for (i = 0; i < data.candidates.length; i++) {
-            senderField.addSelectOption({
-                value:      data.candidates[i].key,
-                text:       buildSenderLabel(data.candidates[i]),
-                isSelected: data.candidates[i].key === defaultSenderKey
-            });
-        }
-
-        // --- Contact selector ---
-        // Options are keyed on the contact's INTERNAL ID. Send Quote keys them on the
-        // email address, so every contact without one gets value '' - the same value as
-        // the placeholder - and becomes unselectable.
-        contactField = form.addField({
-            id:    FLD.CONTACT,
-            type:  serverWidget.FieldType.SELECT,
-            label: 'Select Contact'
-        });
-        contactField.addSelectOption({ value: '', text: '-- Select a contact to fill To --' });
-        for (i = 0; i < data.contacts.length; i++) {
-            contactField.addSelectOption({
-                value: data.contacts[i].id,
-                text:  buildContactLabel(data.contacts[i])
-            });
-        }
-
-        // Row 1 of the Email section.
-        setRowLayout(senderField, 'start');
-        setRowLayout(contactField, 'end');
-
-        // All visible controls now use OUTSIDE flow with explicit row breaks.
-        // Do not overwrite the sender's STARTROW break with STARTCOL.
-
-        // Contact id -> email, for the client script to read when a contact is picked.
-        // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
-        // reads it with rec.getValue and writes the To field with rec.setValue, so the
-        // record model stays the single source of truth throughout.
-        addHiddenLongText(form, FLD.CONTACT_MAP, 'Contact Emails',
-            buildContactEmailMap(data.contacts));
-
-        // --- Recipients: ordinary visible fields. Row 2 of the Email section. ---
-        // Each still accepts a comma separated list, exactly as before.
-        toField  = addVisibleText(form, FLD.TO, 'To',
-            values.to === undefined ? data.customerEmail : values.to,
-            'Separate multiple addresses with commas.');
-        ccField  = addVisibleText(form, FLD.CC, 'CC', values.cc || '',
-            'Separate multiple addresses with commas.');
-        bccField = addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '',
-            'Separate multiple addresses with commas.');
-
-        setDisplayWidth(toField,  WIDTH_EMAIL_FIELD, 'To');
-        setDisplayWidth(ccField,  WIDTH_EMAIL_FIELD, 'CC');
-        setDisplayWidth(bccField, WIDTH_EMAIL_FIELD, 'BCC');
-
-        setRowLayout(toField,  'start');
-        setRowLayout(ccField,  'mid');
-        setRowLayout(bccField, 'end');
-
-        // --- Documents: file, category and link label per slot ---
-        //
-        // NOT in field groups. A FILE field cannot go in one - see addDocumentSlot.
-        addSectionHeading(form, 'docs', 'Documents',
-            'One row per document: choose the file, pick a category, and check the ' +
-            'button label the customer will see. All ' +
-            config.ATTACHMENT_FIELD_COUNT + ' rows can be used in any order - ' +
-            'filling row 7 and leaving 4 to 6 empty is fine.');
-
-        for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
-            addDocumentSlot(form, i, values);
-        }
-
-        addSectionHeading(form, 'options', 'Options', '');
-
-        // Default UNTICKED: linking is the point of this feature, and attaching
-        // reinstates the 10 MB per-file and 15 MB per-message limits.
-        var attachField = form.addField({
-            id:    FLD.ATTACH_TOO,
-            type:  serverWidget.FieldType.CHECKBOX,
-            label: 'Also attach the files to the email'
-        });
-        attachField.defaultValue = values.attachToo ? 'T' : 'F';
-        setRowLayout(attachField, 'start');
-
-        form.addSubmitButton({ label: 'Send Design' });
-        form.addButton({
-            id:           'custpage_dsn_cancel',
-            label:        'Cancel',
-            functionName: 'dsnCancel'
-        });
-
-        form.clientScriptModulePath = './dsn_cs_send_design.js';
-
-        context.response.writePage(form);
     }
 
     /**
@@ -473,223 +334,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     }
 
     /**
-     * One document slot: the file, its category and its button label.
-     *
-     * WHY THESE ARE NOT IN A FIELD GROUP. NetSuite documents that a FILE field "is
-     * available only for Suitelets and will appear on the main tab of the Suitelet
-     * page", and that FILE fields "cannot be added to tabs, subtabs, sublists, or field
-     * groups". Putting a document's file input in one group while its category and label
-     * sat in another - or worse, separating the file from the two fields describing it -
-     * would be harder to use than no grouping at all. Sections are drawn with inline
-     * HTML headings instead, which keeps each document's three fields together and in
-     * the right order.
-     *
-     * The same constraint is why slots 4 to 10 are not collapsed: collapsing needs a
-     * field group, a field group cannot hold the FILE field, and hiding fields with DOM
-     * manipulation was ruled out for this form in Phase 0.
-     *
-     * The three fields are laid across one row with START/MID/END. If NetSuite declines
-     * to honour that on the FILE field - which its own restrictions make plausible, and
-     * which no documentation confirms either way - the visible result is the file on its
-     * own line with the category and label beside it. That still reads correctly and in
-     * the right order, so the layout degrades rather than breaks.
-     */
-    function addDocumentSlot(form, position, values) {
-        var fileField;
-        var categoryField;
-        var labelField;
-
-        // The file field's LABEL carries the row number. NetSuite renders labels in their
-        // own column ahead of the controls, so "Document 7" lines up under "Document 6"
-        // and the number effectively becomes the narrow left-hand column of the table.
-        // There is no native header row, so the labels do that job on every row instead.
-        fileField = form.addField({
-            id:    FLD.FILE_PREFIX + position,
-            type:  serverWidget.FieldType.FILE,
-            label: 'Document ' + position
-        });
-        setDisplayWidth(fileField, WIDTH_FILE_FIELD, 'Document ' + position + ' file');
-
-        // Sourced from the custom list by SCRIPT ID, so the client can add categories
-        // without a deployment.
-        categoryField = form.addField({
-            id:     FLD.CATEGORY_PREFIX + position,
-            type:   serverWidget.FieldType.SELECT,
-            label:  'Category',
-            source: config.LINK_CATEGORY_LIST
-        });
-        categoryField.defaultValue = slotValue(values, position, 'category');
-
-        labelField = form.addField({
-            id:    FLD.LABEL_PREFIX + position,
-            type:  serverWidget.FieldType.TEXT,
-            label: 'Button label'
-        });
-        labelField.setHelpText({
-            help: 'Shown on the button the customer clicks. Choosing a category fills ' +
-                  'this in; edit it freely, for example "Design drawings for Flat 1".'
-        });
-        labelField.defaultValue = slotValue(values, position, 'label');
-        setDisplayWidth(labelField, WIDTH_LABEL_FIELD, 'Document ' + position + ' label');
-
-        setRowLayout(fileField, 'start');
-        setRowLayout(categoryField, 'mid');
-        setRowLayout(labelField, 'end');
-    }
-
-    /**
-     * Keep every visible control in the same OUTSIDE flow as the headings.
-     * STARTROW is a BREAK type here, not a layout type. Only the first
-     * control in each row starts a new row; the next row closes the previous one.
-     * Native FILE rendering and column alignment require a sandbox UI test.
-     * Do not silently swallow a failure to apply the required layout.
-     */
-    function setRowLayout(field, position) {
-        if (['start', 'mid', 'end'].indexOf(position) === -1) {
-            throw new Error('Unknown row position: ' + position);
-        }
-        field.updateLayoutType({
-            layoutType: serverWidget.FieldLayoutType.OUTSIDE
-        });
-        field.updateBreakType({
-            breakType: position === 'start'
-                ? serverWidget.FieldBreakType.STARTROW
-                : serverWidget.FieldBreakType.NONE
-        });
-    }
-
-    /**
-     * Applies a break type, guarded, for the same reason as setLayoutType.
-     */
-    function setBreakType(field, breakType, description) {
-        if (!field || !breakType) { return; }
-
-        try {
-            field.updateBreakType({ breakType: breakType });
-        } catch (e) {
-            log.debug('dsn_sl_send_design.setBreakType',
-                'Could not apply a break type to ' + description + ': ' + e.message +
-                ' - cosmetic only.');
-        }
-    }
-
-    /**
-     * Widens an input. NetSuite's default width for a TEXT field is too narrow to read an
-     * email address or a button label in, and a FILE field's default is too narrow to show
-     * the name of the file somebody just chose.
-     *
-     * Guarded: display size is not supported on every field type, and a field type that
-     * refuses it must not take the form down over a cosmetic setting. A FILE field in
-     * particular may well refuse.
-     */
-    function setDisplayWidth(field, width, description) {
-        if (!field) { return; }
-
-        try {
-            field.updateDisplaySize({ height: 1, width: width });
-        } catch (e) {
-            log.debug('dsn_sl_send_design.setDisplayWidth',
-                'Could not set a display width on ' + description + ': ' + e.message +
-                ' - the field keeps its default width, which is cosmetic only.');
-        }
-    }
-
-    /**
-     * Turns off NetSuite's automatic field balancing for the whole form.
-     *
-     * This is the root cause of the reported layout. Left on, NetSuite distributes main
-     * tab fields across its three-column grid to balance their heights - which is exactly
-     * how the Email section ended up in a narrow column, document slots split between
-     * columns, and Options beside Document 10. No amount of per-field layout fixes that
-     * while the balancer is still redistributing everything around them.
-     *
-     * FieldBreakType.STARTCOL is documented to move its own field into a new column AND to
-     * "disable automatic field balancing if set on any field". It is that side effect that
-     * is wanted, not the column break.
-     *
-     * IT GOES ON THE FIRST VISIBLE FIELD IN THE COLUMN FLOW - Send As.
-     *
-     * Phase 2c put it on the HIDDEN Opportunity ID field, on the reasoning that an
-     * invisible field was the safest place for a column break. Sandbox showed the three
-     * columns still there, so a hidden field's break type is evidently not honoured, or
-     * not honoured for this purpose. Send As is the first field the flow actually reaches,
-     * so starting a column there is a no-op visually - there is nothing before it to be
-     * separated from - while the side effect still applies to the whole form.
-     *
-     * The section headings are not candidates for this: they sit OUTSIDE the column grid,
-     * so a column break on one of them has nothing to act on.
-     */
-    function disableFieldBalancing(field) {
-        setBreakType(field, serverWidget.FieldBreakType.STARTCOL,
-            'the automatic field balancing switch on the first visible field');
-    }
-
-    /**
-     * Applies a layout type, guarded.
-     *
-     * Layout is presentation only, so a field type that refuses one must not take the
-     * whole form down with it. A refusal is logged at debug, not error: the form is still
-     * perfectly usable, just laid out differently from the intent.
-     */
-    function setLayoutType(field, layoutType, description) {
-        if (!field || !layoutType) { return; }
-
-        try {
-            field.updateLayoutType({ layoutType: layoutType });
-        } catch (e) {
-            log.debug('dsn_sl_send_design.setLayoutType',
-                'Could not apply ' + description + ': ' + e.message +
-                ' - the field will fall back to the default flow, which is cosmetic only.');
-        }
-    }
-
-    /**
-     * A section heading drawn as inline HTML, standing in for a field group.
-     *
-     * Field groups are unavailable for the document sections because they cannot contain
-     * a FILE field (see addDocumentSlot), and a form that grouped some sections natively
-     * and others with headings would look accidental. So every section is drawn the same
-     * way.
-     */
-    function addSectionHeading(form, key, title, blurb) {
-        var field;
-        var html = '<div style="border-top:2px solid #00857D; margin:18px 0 6px 0; ' +
-                   'padding-top:8px; width:100%;">' +
-                   '<span style="font-size:15px; font-weight:600; color:#00857D;">' +
-                   config.escapeHtml(title) + '</span>';
-
-        if (blurb) {
-            html = html + '<div style="font-size:12px; color:#555; margin-top:2px;">' +
-                   config.escapeHtml(blurb) + '</div>';
-        }
-        html = html + '</div>';
-
-        field = form.addField({
-            id:    FLD.HEADING_PREFIX + key,
-            type:  serverWidget.FieldType.INLINEHTML,
-            label: ' '
-        });
-        field.defaultValue = html;
-
-        // OUTSIDE renders the field across the FULL form width, outside NetSuite's column
-        // grid. On its own that was not enough - Phase 2b set OUTSIDEABOVE and sections
-        // still shared columns - because a layout type says WHERE a field sits, not that
-        // a new row begins.
-        //
-        // The missing half is the BREAK type. FieldBreakType.STARTROW "places a field
-        // located outside of a field group on a new row", and is documented to work ONLY
-        // on fields whose layout type is OUTSIDE, OUTSIDEABOVE or OUTSIDEBELOW - which is
-        // precisely this pairing. Setting one without the other does nothing useful, and
-        // that is the likeliest reason the previous attempt did not stack.
-        setLayoutType(field, serverWidget.FieldLayoutType.OUTSIDE,
-            'section heading "' + title + '"');
-        setBreakType(field, serverWidget.FieldBreakType.STARTROW,
-            'section heading "' + title + '"');
-
-        return field;
-    }
-
-    /**
      * A previously submitted category or label for slot n, so a refused submission does
      * not make the user retype every label. The file selections themselves cannot be
      * restored - no browser allows it - which is exactly why the labels should be.
@@ -716,42 +360,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             return contact.name + ' (' + contact.email + ')';
         }
         return contact.name + ' (no email)';
-    }
-
-    function addVisibleText(form, fieldId, label, value, help) {
-        var field = form.addField({
-            id:    fieldId,
-            type:  serverWidget.FieldType.TEXT,
-            label: label
-        });
-        if (help) { field.setHelpText({ help: help }); }
-        if (value) { field.defaultValue = value; }
-        return field;
-    }
-
-    /**
-     * JSON of contact internal ID -> email address. Contacts with no email are included
-     * with an empty string, so the client script can tell "no email recorded" apart
-     * from "not a contact on this Opportunity" and leave the To field alone either way.
-     */
-    function buildContactEmailMap(contacts) {
-        var map = {};
-        var i;
-        for (i = 0; i < contacts.length; i++) {
-            map[contacts[i].id] = contacts[i].email || '';
-        }
-        return JSON.stringify(map);
-    }
-
-    function addHiddenLongText(form, fieldId, label, value) {
-        var field = form.addField({
-            id:    fieldId,
-            type:  serverWidget.FieldType.LONGTEXT,
-            label: label
-        });
-        if (value) { field.defaultValue = value; }
-        field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
-        return field;
     }
 
     function addHiddenText(form, fieldId, label, value) {
@@ -1110,7 +718,26 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
             fieldId = FLD.FILE_PREFIX + i;
             fileObj = requestFiles[fieldId];
-            if (fileObj) {
+
+            // A NAME is required, not merely that an object arrived.
+            //
+            // An untouched <input type="file"> can still post a multipart part - one with
+            // an empty filename and no content. Accepting it on truthiness alone turns an
+            // empty row into a phantom upload, which then fails validation for having no
+            // label and blocks the entire send while naming a row the user never filled -
+            // and they lose every file selection retrying, because no browser can restore
+            // a file input.
+            //
+            // The page's submit guard disables empty inputs before posting, so this should
+            // not arise. But that guard is browser JavaScript, and if it does not run the
+            // failure is loud and baffling. With native FILE fields the platform
+            // guaranteed empty slots were simply absent (see the Phase 0 spike); the
+            // hand-written form moved that guarantee into a line of JS, and this puts it
+            // back on the server where it cannot be skipped.
+            //
+            // With this check in place, isOversized treating a zero size as acceptable is
+            // harmless: nothing zero-sized gets this far.
+            if (fileObj && String(fileObj.name || '').trim()) {
                 uploads.push({
                     fieldId:    fieldId,
                     position:   i,

@@ -912,12 +912,10 @@ the only source we had, and it belongs in this document as firmly as the origina
 
 ### Secondary points worth a decision
 
-- **`showNativeFormLegacy` is ~160 lines of unreachable code.** Justified while the upload
-  question is open; it should be deleted once a real send is confirmed, or restored if it is
-  not. It should not be left indefinitely.
-- **`setRowLayout` now throws instead of degrading.** Inert today because only the legacy
-  path calls it, but if that path is ever revived, a field type refusing a layout will take
-  the form down rather than stacking — the opposite of the guarded behaviour it had.
+- ~~**`showNativeFormLegacy` is ~160 lines of unreachable code.**~~ **Resolved in 1.6.1** —
+  uploads were confirmed in Sandbox, so it was deleted. See below.
+- ~~**`setRowLayout` now throws instead of degrading.**~~ **Resolved in 1.6.1** — deleted
+  with the rest of the native path.
 - **The page has no NetSuite chrome.** A raw HTML response loses the usual header and
   navigation. That may well be fine for a task-focused page reached from a button, but it is
   a change in feel worth noticing rather than discovering.
@@ -934,3 +932,111 @@ exists on the GET path. Those assertions were testing attempt 4's mechanism, and
 removed it. They have deliberately **not** been rewritten to match: the tests should follow a
 decision about whether 1.6.0 stays, not be quietly reshaped around it while its central
 question is still open.
+
+
+---
+
+## 1.6.1 — the review findings applied
+
+`dsn_sl_send_design.js` **1.6.0 → 1.6.1**. `node --check` passes on all six files.
+
+**Uploads are confirmed working in Sandbox** — one file, three files, and non-contiguous
+slots 1 and 9 all parsed through the hand-written multipart form. That settles the question
+attempt 5 left open, and it contradicts the only source we had found on hand-rolled
+multipart in a Suitelet, which claimed NetSuite does not parse it. **It does.** That finding
+is worth as much as the original spike and is recorded here for the same reason.
+
+### The phantom empty part — fixed server-side
+
+`collectUploads` now requires a **filename**, not merely that an object arrived:
+
+```javascript
+if (fileObj && String(fileObj.name || '').trim()) {
+```
+
+An untouched `<input type="file">` can still post a multipart part — one with an empty
+filename and no content. Accepting it on truthiness alone turned an empty row into a
+phantom upload, which then failed validation for having no label and **blocked the entire
+send while naming a row the user never filled** — and they lost every file selection
+retrying, because no browser can restore a file input.
+
+The page's submit guard disables empty inputs before posting, and **it is kept**. But that
+guard is browser JavaScript; if it does not run, the failure is loud and baffling. With
+native FILE fields the platform guaranteed empty slots were simply absent (the Phase 0
+spike); the hand-written form moved that guarantee into a line of JS, and this puts it back
+on the server where it cannot be skipped. Two cheap defences against one confusing failure.
+
+With the name check in place, `isOversized` treating a zero size as acceptable is harmless:
+nothing zero-sized reaches it.
+
+### Two latent rules, recorded rather than defended against
+
+**No user data goes in the `<script>` block.** Everything interpolated there is a hard-coded
+field ID via `JSON.stringify`; the script reaches user values through DOM property reads —
+`getAttribute("data-email")` and `options[i].text` — which parse nothing. That is why the
+escaping review came back clean, and it is a rule to preserve rather than a happy accident:
+`esc()` is an HTML escaper, and HTML escaping does **not** make a value safe inside a
+`<script>` element. A category named `</script>...` would end the block early, escaped or
+not. The comment sits at the script block, where anyone about to break the rule will be
+reading.
+
+**The action-less form depends on the address bar.** With no `action`, the browser posts to
+the current URL including its query string — which is what carries `script` and `deploy`.
+That works, and is now confirmed working. But it depends on the URL rather than on anything
+the page states, so it would break if the page were reached by a redirect that dropped the
+query. **Deliberately not defended against:** that failure is loud and already handled —
+without an `opportunityId` the POST lands on "No Opportunity … nothing was sent" — so an
+explicit action is not justified. Recorded so the cause is obvious if it ever happens.
+
+### The native path is deleted
+
+`showNativeFormLegacy` and everything only it called are gone — **398 lines**:
+`disableFieldBalancing`, `setRowLayout`, `setLayoutType`, `setBreakType`, `setDisplayWidth`,
+`addSectionHeading`, `addDocumentSlot`, `addVisibleText`, `addHiddenLongText`,
+`buildContactEmailMap`, and the three width constants. `serverWidget` is still imported and
+used, by the success and message pages.
+
+It was kept as a fallback in case hand-rolled multipart failed to parse. It did not fail, so
+the fallback has no purpose — and **dead code that looks like a working alternative is worse
+than no code**, because the next person to read it will believe there is a supported route
+back to native fields. There is not; the four failed layout attempts above are what that
+route actually produced.
+
+Two now-unused constants remain in `FLD` — `NOTICE` and `CONTACT_MAP`. They are left
+deliberately: `FLD` is the one registry of this feature's field IDs, and
+`custpage_dsn_contact_map` is still named by `dsn_cs_send_design.js`, which is still attached
+to the result pages for their Cancel button.
+
+### Tests rebuilt
+
+The GET-side suites asserted on serverWidget layout types and field ordering for a form that
+no longer exists on that path — stale, not wrong. They are replaced by a new suite built
+against what the page now is, covering:
+
+- the document table: ten rows, the expected input names, numerical order, each row's three
+  controls inside its own `<tr>`, the four column headers, and the `colgroup` that aligns
+  the columns down all ten rows;
+- categories drawn from the custom list, with nothing hard-coded in the source;
+- **escaping in every user-controlled channel**, with hostile values actually injected — a
+  category named `Installer's notes`, one containing quotes and angle brackets, one named
+  `</script><script>alert(1)</script>`, and an employee whose name and email carry quotes,
+  apostrophes and a script tag. The page keeps exactly one `<script>` and one `</script>`;
+- the rule above, asserted directly: no user-controlled string appears inside the script
+  block;
+- both inline behaviours, including that each category select targets its **own** row label;
+- the submit guard: empty-input disabling, the no-file refusal, double-submit protection and
+  re-enabling on back-navigation;
+- **the phantom empty part**: a populated slot 1 plus an empty part for slot 3 is ignored,
+  the real document still sends, the phantom is never saved, and no confusing "Document 3"
+  refusal appears. Whitespace-only filenames too;
+- refusals re-rendering the hand-written page with the typed values preserved and hostile
+  file names escaped in the banner;
+- that every removed function is genuinely gone from the source.
+
+No assertion was weakened. Where a POST-side assertion read the refusal banner out of a
+serverWidget field, it was repointed at the rendered HTML — the same claim, read from where
+the message now lives. One assertion failed honestly at first because the test was not
+injecting the hostile employee data it claimed to check; the test was fixed to inject it,
+not relaxed.
+
+**249 assertions across eight suites, all passing.**
