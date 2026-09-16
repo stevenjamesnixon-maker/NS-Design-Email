@@ -1,5 +1,8 @@
 # Phase 2 — documents as links
 
+*(Phase 2a — form layout and email presentation — is recorded at the end of this
+document.)*
+
 Status: **code complete, not tested in NetSuite.** Nothing is deployed and nothing is
 merged. Verification is `node --check` plus the stubbed harness (below). **One question
 could not be settled from documentation and needs a Sandbox check before go-live — see
@@ -290,3 +293,151 @@ Worth adding, given Step 1:
 3. **`{{PROJECT_REF}}` is still assumed to be the Opportunity `tranid`** (Phase 1 open
    item), and the email subject is still this project's wording rather than template
    3334's own.
+
+
+---
+---
+
+# Phase 2a — form layout and email presentation
+
+Cosmetic and layout only. Sender resolution, publishing, naming, validation and the send
+itself are untouched.
+
+| File | Version | Change |
+|---|---|---|
+| `lib/dsn_lib_config.js` | 1.1.0 → **1.2.0** | Ten document slots |
+| `dsn_email_template.js` | 1.1.0 → **1.2.0** | Fixed-width buttons; "Confirm your design" block removed |
+| `dsn_sl_send_design.js` | 1.1.0 → **1.2.0** | Sectioned form, row layout, ten slots |
+| `dsn_cs_send_design.js` | 1.1.0 → **1.2.0** | Slot count kept in step with the server |
+
+`node --check` passes on all six files.
+
+---
+
+## The FILE field finding — read this before the rest
+
+The brief asked whether a FILE field renders correctly in a horizontal row alongside other
+fields, and said to propose the closest workable layout if it does not. **The real
+constraint is stronger than "it may insist on its own line", and it changes the shape of
+the answer.**
+
+NetSuite documents, in the `serverWidget.FieldType` reference, that the `FILE` type
+
+> *"is available only for Suitelets and will appear on the main tab of the Suitelet page.
+> FILE fields cannot be added to tabs, subtabs, sublists, or field groups and are not
+> allowed on existing pages."*
+
+([serverWidget.FieldType](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4337960739.html);
+the same restriction is repeated in community references to the
+[serverWidget module](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4321345532.html).)
+
+So **a FILE field cannot go in a field group at all.** Two consequences:
+
+### 1. The document groups cannot exist as briefed
+
+"Group *Document 1*: file, category, button label" is not buildable — the file input
+cannot be inside the group. The alternatives were:
+
+- Put the category and label in a group and leave the file outside it. This separates a
+  document's file input from the two fields that describe it, which is **worse than no
+  grouping at all** — the user would be matching "Document 3" in one place against
+  "Category" in another.
+- Drop field groups and draw the sections another way.
+
+**Built: the second.** Every section — *Email*, *Documents*, *More documents*, *Options* —
+is an `INLINEHTML` heading with a rule and a one-line explanation, and all fields sit on
+the main tab in the order the brief specified. Each document's three fields stay adjacent
+and in order.
+
+Field groups would have worked for *Email* and *Options*, which contain no FILE field. They
+are not used there either, deliberately: a form that grouped two sections natively and drew
+the other two with headings would look like a mistake rather than a decision, and mixing
+grouped and ungrouped fields makes the rendered order harder to predict.
+
+### 2. Slots 4–10 cannot be collapsed
+
+Collapsing requires a field group's own collapse setting; a field group cannot hold the
+FILE field; and hiding fields with DOM manipulation was ruled out for this form in Phase 0
+and the reasoning still holds. **There is no third option**, so slots 4–10 are visible,
+under a *More documents* heading that says what they are for and that slots may be used in
+any order.
+
+The form is therefore long. That is the honest cost of ten slots given the constraint, and
+it is better than a form that hides fields in a way the platform does not support.
+
+### 3. Row layout is attempted and degrades safely
+
+Within each section the fields are laid across with `STARTROW` / `MIDROW` / `ENDROW`
+([serverWidget.FieldLayoutType](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4332671038.html)),
+which is documented as positioning fields *outside* a field group on the same row —
+exactly the situation here.
+
+**Whether the FILE field honours it is not documented either way**, and given its other
+restrictions it may not. So `setRowLayout` wraps the call in try/catch: a refusal is logged
+at `debug` and the field simply stacks. If the FILE field refuses, the visible result is
+the file on its own line with the category and label beside it — still correct, still in
+order, just taller. The layout degrades rather than breaks, and the harness tests both
+outcomes.
+
+**This is worth one look in Sandbox** — not because anything fails if it is wrong, but
+because the answer decides whether the form reads as three columns or as a file above two.
+
+---
+
+## Email changes
+
+**Equal-width buttons.** Every CTA is a fixed 280px, set as *both* a `width` attribute and
+a CSS `width` — Outlook honours the attribute, most other clients the style. The label is
+centred and `word-wrap:break-word` lets a long label wrap to a second line; nothing sets
+`white-space:nowrap`, so no label can stretch the button. Matching widths read as a set;
+matching heights do not, which is why height is allowed to vary. The MSO conditional pair
+is intact on both halves of every button.
+
+**"Confirm your design" removed.** The whole grey block went — heading, image, body copy
+and both CONFIRM DRAWINGS buttons with their MSO fallback. The removed range was verified
+self-contained before deletion (equal counts of `<table>`/`</table>`, `<tr>`/`</tr>`,
+`<td>`/`</td>` inside it), and the harness re-checks tag balance across the whole rendered
+body afterwards.
+
+**`{{PROJECT_REF_URL}}` is gone.** Those two mailto links were its only use, so the tag and
+its `encodeURIComponent` helper were removed with them. `{{PROJECT_REF}}` remains, in the
+body text. Nothing else referenced either.
+
+---
+
+## Why there is no "add another document" button
+
+Recorded so it is not re-attempted. It cannot be built:
+
+- A Suitelet form is **rendered server-side**. A client script cannot add a NetSuite field
+  to a page that has already loaded.
+- Re-submitting the form to re-render it with more slots **would discard every file already
+  chosen**, because no browser can repopulate a file input.
+- Building the inputs in raw HTML instead would mean hand-rolled DOM writes on this form,
+  which Phase 0 rejected, and would bypass the multipart handling the Phase 0 spike
+  confirmed works.
+
+Ten fixed slots is the honest form of "as many as you need".
+
+---
+
+## Verification
+
+**167 assertions across five suites, all passing** (10 user event, 32 Suitelet logic,
+42 Phase 1 end-to-end, 45 Phase 2, 38 Phase 2a), plus `node --check` on all six files.
+Earlier suites were updated where Phase 2a legitimately changed their expectations — the
+slot count rose from five to ten — rather than left failing.
+
+Phase 2a tests cover: identical button widths with wildly different label lengths; the
+removed block leaving balanced markup and the rest of the email intact; section order and
+row layout on the form; the FILE-field-refuses-layout degradation path; slot 7 alone;
+slots 1 and 9 with a gap; all ten slots; and slot 10 still obeying the 10 MB check and the
+label rules.
+
+---
+
+## Still open after 2a
+
+Unchanged from Phase 2: the `File.url` question (b), retention now that links live in
+customers' mailboxes, and `{{PROJECT_REF}}`/subject wording. Added by 2a: whether the FILE
+field honours a row layout type, which is cosmetic either way.

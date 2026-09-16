@@ -48,7 +48,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.1.0';
+    var SCRIPT_VERSION = '1.2.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -62,8 +62,16 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         FILE_PREFIX:     'custpage_dsn_file_',
         CATEGORY_PREFIX: 'custpage_dsn_category_',
         LABEL_PREFIX:    'custpage_dsn_label_',
-        ATTACH_TOO:      'custpage_dsn_attach_too'
+        ATTACH_TOO:      'custpage_dsn_attach_too',
+        HEADING_PREFIX:  'custpage_dsn_heading_'
     };
+
+    /**
+     * Documents 1 to this number are presented as the everyday case; the rest follow
+     * under a "More documents" heading. Purely presentational - every slot behaves
+     * identically.
+     */
+    var PRIMARY_DOCUMENT_SLOTS = 3;
 
     /** Sender candidate keys. The form posts one of these, never an employee ID: the
      *  candidates are re-resolved from the record on POST rather than trusted from the
@@ -154,6 +162,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
         addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
 
+        addSectionHeading(form, 'email', 'Email',
+            'Who the email comes from, and who it goes to.');
+
         // --- Sender ---
         senderField = form.addField({
             id:    FLD.SENDER,
@@ -186,6 +197,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             });
         }
 
+        setRowLayout(senderField, 'start');
+        setRowLayout(contactField, 'end');
+
         // Contact id -> email, for the client script to read when a contact is picked.
         // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
         // reads it with rec.getValue and writes the To field with rec.setValue, so the
@@ -193,43 +207,33 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         addHiddenLongText(form, FLD.CONTACT_MAP, 'Contact Emails',
             buildContactEmailMap(data.contacts));
 
-        // --- Recipients: ordinary visible fields ---
-        addVisibleText(form, FLD.TO, 'To',
+        // --- Recipients: ordinary visible fields, laid across one row ---
+        setRowLayout(addVisibleText(form, FLD.TO, 'To',
             values.to === undefined ? data.customerEmail : values.to,
-            'Separate multiple addresses with commas.');
-        addVisibleText(form, FLD.CC, 'CC', values.cc || '', '');
-        addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '', '');
+            'Separate multiple addresses with commas.'), 'start');
+        setRowLayout(addVisibleText(form, FLD.CC, 'CC', values.cc || '', ''), 'mid');
+        setRowLayout(addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '', ''), 'end');
 
-        // --- Attachments: file, category and link label per slot ---
+        // --- Documents: file, category and link label per slot ---
+        //
+        // NOT in field groups. A FILE field cannot go in one - see addDocumentSlot.
         for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
-            form.addField({
-                id:    FLD.FILE_PREFIX + i,
-                type:  serverWidget.FieldType.FILE,
-                label: 'Document ' + i
-            });
-
-            // Sourced from the custom list by SCRIPT ID, so the client can add
-            // categories without a deployment.
-            form.addField({
-                id:     FLD.CATEGORY_PREFIX + i,
-                type:   serverWidget.FieldType.SELECT,
-                label:  'Document ' + i + ' category',
-                source: config.LINK_CATEGORY_LIST
-            }).defaultValue = slotValue(values, i, 'category');
-
-            form.addField({
-                id:    FLD.LABEL_PREFIX + i,
-                type:  serverWidget.FieldType.TEXT,
-                label: 'Document ' + i + ' button label'
-            });
-            form.getField({ id: FLD.LABEL_PREFIX + i }).setHelpText({
-                help: 'Shown on the button the customer clicks. Choosing a category ' +
-                      'fills this in; edit it freely, for example ' +
-                      '"Design drawings for Flat 1".'
-            });
-            form.getField({ id: FLD.LABEL_PREFIX + i }).defaultValue =
-                slotValue(values, i, 'label');
+            if (i === 1) {
+                addSectionHeading(form, 'docs', 'Documents',
+                    'Attach a document, pick a category, and check the button label ' +
+                    'the customer will see. Leave any slot empty to skip it.');
+            }
+            if (i === PRIMARY_DOCUMENT_SLOTS + 1) {
+                addSectionHeading(form, 'moredocs', 'More documents',
+                    'Slots ' + (PRIMARY_DOCUMENT_SLOTS + 1) + ' to ' +
+                    config.ATTACHMENT_FIELD_COUNT + ', for larger sets. They work ' +
+                    'exactly like the ones above and can be used in any order - ' +
+                    'filling slot 7 and leaving 4 to 6 empty is fine.');
+            }
+            addDocumentSlot(form, i, values);
         }
+
+        addSectionHeading(form, 'options', 'Options', '');
 
         // Default UNTICKED: linking is the point of this feature, and attaching
         // reinstates the 10 MB per-file and 15 MB per-message limits.
@@ -283,6 +287,118 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         }
 
         return html.join('');
+    }
+
+    /**
+     * One document slot: the file, its category and its button label.
+     *
+     * WHY THESE ARE NOT IN A FIELD GROUP. NetSuite documents that a FILE field "is
+     * available only for Suitelets and will appear on the main tab of the Suitelet
+     * page", and that FILE fields "cannot be added to tabs, subtabs, sublists, or field
+     * groups". Putting a document's file input in one group while its category and label
+     * sat in another - or worse, separating the file from the two fields describing it -
+     * would be harder to use than no grouping at all. Sections are drawn with inline
+     * HTML headings instead, which keeps each document's three fields together and in
+     * the right order.
+     *
+     * The same constraint is why slots 4 to 10 are not collapsed: collapsing needs a
+     * field group, a field group cannot hold the FILE field, and hiding fields with DOM
+     * manipulation was ruled out for this form in Phase 0.
+     *
+     * The three fields are laid across one row with START/MID/END. If NetSuite declines
+     * to honour that on the FILE field - which its own restrictions make plausible, and
+     * which no documentation confirms either way - the visible result is the file on its
+     * own line with the category and label beside it. That still reads correctly and in
+     * the right order, so the layout degrades rather than breaks.
+     */
+    function addDocumentSlot(form, position, values) {
+        var fileField;
+        var categoryField;
+        var labelField;
+
+        fileField = form.addField({
+            id:    FLD.FILE_PREFIX + position,
+            type:  serverWidget.FieldType.FILE,
+            label: 'Document ' + position
+        });
+
+        // Sourced from the custom list by SCRIPT ID, so the client can add categories
+        // without a deployment.
+        categoryField = form.addField({
+            id:     FLD.CATEGORY_PREFIX + position,
+            type:   serverWidget.FieldType.SELECT,
+            label:  'Category',
+            source: config.LINK_CATEGORY_LIST
+        });
+        categoryField.defaultValue = slotValue(values, position, 'category');
+
+        labelField = form.addField({
+            id:    FLD.LABEL_PREFIX + position,
+            type:  serverWidget.FieldType.TEXT,
+            label: 'Button label'
+        });
+        labelField.setHelpText({
+            help: 'Shown on the button the customer clicks. Choosing a category fills ' +
+                  'this in; edit it freely, for example "Design drawings for Flat 1".'
+        });
+        labelField.defaultValue = slotValue(values, position, 'label');
+
+        setRowLayout(fileField, 'start');
+        setRowLayout(categoryField, 'mid');
+        setRowLayout(labelField, 'end');
+    }
+
+    /**
+     * Positions a field within a row.
+     *
+     * Wrapped in try/catch because updateLayoutType is presentation only: a field type
+     * that refuses a layout must not take the whole form down with it. A refusal is
+     * logged once at debug, not at error - the form is still perfectly usable, just
+     * stacked rather than laid across.
+     */
+    function setRowLayout(field, position) {
+        var layoutTypes = {
+            start: serverWidget.FieldLayoutType.STARTROW,
+            mid:   serverWidget.FieldLayoutType.MIDROW,
+            end:   serverWidget.FieldLayoutType.ENDROW
+        };
+
+        if (!field) { return; }
+
+        try {
+            field.updateLayoutType({ layoutType: layoutTypes[position] });
+        } catch (e) {
+            log.debug('dsn_sl_send_design.setRowLayout',
+                'Could not set layout type "' + position + '": ' + e.message +
+                ' - the field will stack instead, which is cosmetic only.');
+        }
+    }
+
+    /**
+     * A section heading drawn as inline HTML, standing in for a field group.
+     *
+     * Field groups are unavailable for the document sections because they cannot contain
+     * a FILE field (see addDocumentSlot), and a form that grouped some sections natively
+     * and others with headings would look accidental. So every section is drawn the same
+     * way.
+     */
+    function addSectionHeading(form, key, title, blurb) {
+        var html = '<div style="border-top:2px solid #00857D; margin:18px 0 6px 0; ' +
+                   'padding-top:8px;">' +
+                   '<span style="font-size:15px; font-weight:600; color:#00857D;">' +
+                   config.escapeHtml(title) + '</span>';
+
+        if (blurb) {
+            html = html + '<div style="font-size:12px; color:#555; margin-top:2px;">' +
+                   config.escapeHtml(blurb) + '</div>';
+        }
+        html = html + '</div>';
+
+        form.addField({
+            id:    FLD.HEADING_PREFIX + key,
+            type:  serverWidget.FieldType.INLINEHTML,
+            label: ' '
+        }).defaultValue = html;
     }
 
     /**

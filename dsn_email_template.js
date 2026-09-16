@@ -11,9 +11,7 @@
  * WHY THE HTML LIVES IN A SCRIPT
  *   Template 3334 cannot be used as a NetSuite template because its merge fields
  *   bind to the CAD Worklist custom record, which is being retired:
- *     ${customrecord.custrecord_cad_opportunity}  -> {{PROJECT_REF}} in body text,
- *                                                    {{PROJECT_REF_URL}} inside the two
- *                                                    CONFIRM DRAWINGS mailto subjects
+ *     ${customrecord.custrecord_cad_opportunity}  -> {{PROJECT_REF}}
  *     ${customrecord.custrecord_cad_proj_eng}     -> {{SENDER_NAME}}
  *     ${customrecord.custrecord_pe_phone}         -> {{SENDER_PHONE}}
  *   The markup is otherwise byte-for-byte the template's own, generated from
@@ -26,8 +24,10 @@
  *   1. The footer sentence hard-coded the role "Project Engineer" and the address
  *      design@nu-heat.co.uk. Both are now tags: the role varies with the sender, and
  *      the address comes from the config library rather than a literal in this string.
- *   2. Nothing else. The CONFIRM DRAWINGS button still points at
- *      customer.support@nu-heat.co.uk and still carries {{PROJECT_REF}} in its subject.
+ *   2. Phase 2a removed the "Confirm your design" block outright - its heading, image,
+ *      body copy and both CONFIRM DRAWINGS buttons. With it went the only use of
+ *      {{PROJECT_REF_URL}}, so that tag and its percent-encoding are gone too;
+ *      {{PROJECT_REF}} remains, in the body text.
  *
  * PHASE 2 TAGS
  *   {{INTRO_COPY}}      replaces the fixed sentence "Please find your bespoke
@@ -49,7 +49,7 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.1.0';
+    var TEMPLATE_VERSION = '1.2.0';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
@@ -434,77 +434,6 @@ function (config) {
         '</td>',
         '</tr>',
         '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#d8d8d8" style="background-color:#d8d8d8;">',
-        '<tr>',
-        '<td valign="top">',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" style="padding-top:15px;padding-right:10px;padding-bottom:15px;padding-left:10px;"><div><h1 style="font-family:Calibri, Arial, sans-serif;font-size:31px;color:#59315f;font-weight:normal;line-height:35px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:center;padding:0;margin:0;"><span class="mso-font-fix-arial"><b>Confirm your design</b></span></h1></div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" align="center" style="padding-bottom:10px;"><!--[if gte mso 9]><table width="144" cellpadding="0" cellspacing="0"><tr><td><![endif]-->',
-        '<table cellpadding="0" cellspacing="0" border="0" class="img-wrap" style="max-width:100%;">',
-        '<tr>',
-        '<td valign="top" align="center"><a href="https://www.nu-heat.co.uk/request-design-changes/" class="imglink" target="_blank">',
-        '<img src="https://images.chamaileon.io/5b1fac592f38b800113c85ca/5ca8626420e2346b3ee9a013/1698665508018_Design.png" width="144" height="144" alt="Request changes" border="0" style="display:block;font-size:14px;max-width:100%;height:auto;" class="width144" />',
-        '</a>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<!--[if gte mso 9]></td></tr></table><![endif]-->',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" style="padding-top:5px;padding-right:20px;padding-bottom:20px;padding-left:20px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:center;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you\'re happy with your installation drawings, please let us know by clicking below.</span></p></div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" align="center" style="padding-right:20px;padding-bottom:20px;padding-left:20px;">',
-        '<!--[if !mso]><!-- -->',
-        '<a href="mailto:customer.support@nu-heat.co.uk?subject=Confirmation%20of%20pre-installation%20drawings%20for%3A%20{{PROJECT_REF_URL}}&body=Hello%2C%20%0A%0AI%20would%20like%20to%20confirm%20that%20I%20am%20happy%20with%20my%20installation%20drawings.%20" style="display:inline-block; text-decoration:none;" class="fluid-on-mobile">',
-        '<span>',
-        '<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">',
-        '<tr>',
-        '<td align="center" style="padding:15px;">',
-        '<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">',
-        '<font style="color:#3e3b39;" class="button">',
-        '<span><strong>CONFIRM DRAWINGS</strong></span>',
-        '</font>',
-        '</span>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '</span>',
-        '</a>',
-        '<!--<![endif]-->',
-        '<div style="display:none; mso-hide: none;">',
-        '<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">',
-        '<tr>',
-        '<td align="center" style="padding:15px;">',
-        '<a href="mailto:customer.support@nu-heat.co.uk?subject=Confirmation%20of%20pre-installation%20drawings%20for%3A%20{{PROJECT_REF_URL}}&body=Hello%2C%20%0A%0AI%20would%20like%20to%20confirm%20that%20I%20am%20happy%20with%20my%20installation%20drawings.%20" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">',
-        '<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">',
-        '<font style="color:#3e3b39;" class="button">',
-        '<span><strong>CONFIRM DRAWINGS</strong></span>',
-        '</font>',
-        '</span>',
-        '</a>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '</div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '</td>',
-        '</tr>',
-        '</table>',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#ffffff" style="background-color:#ffffff;">',
         '<tr>',
         '<td valign="top"><table cellpadding="0" cellspacing="0" border="0" width="100%" class="mcol">',
@@ -853,6 +782,19 @@ function (config) {
         'Your bespoke installation drawings are ready. Please use the buttons below to ' +
         'open each document.';
 
+    /**
+     * Fixed button width, in pixels.
+     *
+     * Every document button is this wide whatever its label says, so a column of them
+     * lines up instead of stepping in and out with the label length. A long label wraps
+     * onto a second line and the button grows taller; it never grows wider. Matching
+     * widths read as a set, matching heights do not.
+     *
+     * Applied as BOTH a width attribute and a CSS width: Outlook honours the attribute,
+     * most other clients the style, and older clients ignoring both still get a button.
+     */
+    var BUTTON_WIDTH_PX = 280;
+
     var INTRO_COPY_LINKED_AND_ATTACHED =
         'Please find your bespoke installation drawings attached. They are also ' +
         'available using the buttons below.';
@@ -860,8 +802,8 @@ function (config) {
     /**
      * Builds the CTA buttons for {{DOCUMENT_LINKS}}.
      *
-     * The markup is copied from the CONFIRM DRAWINGS button in this same template,
-     * INCLUDING its MSO conditional pair:
+     * The markup is copied from the CONFIRM DRAWINGS button that this template used to
+     * carry (removed in Phase 2a), INCLUDING its MSO conditional pair:
      *
      *   <!--[if !mso]><!-- -->   ... anchor-wrapped table, for everything else
      *   <!--<![endif]-->
@@ -899,11 +841,11 @@ function (config) {
 
             // Everything except Outlook.
             html.push('<!--[if !mso]><!-- -->');
-            html.push('<a href="' + href + '" style="display:inline-block; text-decoration:none;" class="fluid-on-mobile">');
+            html.push('<a href="' + href + '" style="display:inline-block; text-decoration:none; width:' + BUTTON_WIDTH_PX + 'px;" class="fluid-on-mobile">');
             html.push('<span>');
-            html.push('<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + BUTTON_WIDTH_PX + '" bgcolor="#ffb500" class="fluid-on-mobile" style="width:' + BUTTON_WIDTH_PX + 'px;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
             html.push('<tr>');
-            html.push('<td align="center" style="padding:15px;">');
+            html.push('<td align="center" width="' + BUTTON_WIDTH_PX + '" style="width:' + BUTTON_WIDTH_PX + 'px;padding:15px;text-align:center;word-wrap:break-word;">');
             html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
             html.push('<font style="color:#3e3b39;" class="button">');
             html.push('<span><strong>' + label + '</strong></span>');
@@ -918,9 +860,9 @@ function (config) {
 
             // Outlook only.
             html.push('<div style="display:none; mso-hide: none;">');
-            html.push('<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + BUTTON_WIDTH_PX + '" bgcolor="#ffb500" class="fluid-on-mobile" style="width:' + BUTTON_WIDTH_PX + 'px;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
             html.push('<tr>');
-            html.push('<td align="center" style="padding:15px;">');
+            html.push('<td align="center" width="' + BUTTON_WIDTH_PX + '" style="width:' + BUTTON_WIDTH_PX + 'px;padding:15px;text-align:center;word-wrap:break-word;">');
             html.push('<a href="' + href + '" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">');
             html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
             html.push('<font style="color:#3e3b39;" class="button">');
@@ -976,12 +918,6 @@ function (config) {
             html = replaceAll(html, PHONE_CLAUSE, '');
         }
 
-        // {{PROJECT_REF}} sits in body text; {{PROJECT_REF_URL}} sits inside the two
-        // CONFIRM DRAWINGS mailto query strings. A reference like "OPP123 - 12 High St"
-        // contains spaces and may contain '&', either of which breaks a mailto href if
-        // it is only HTML-escaped, so the URL occurrences are percent-encoded instead.
-        html = replaceAll(html, '{{PROJECT_REF_URL}}',
-            config.escapeHtml(encodeURIComponent(trimOrEmpty(opts.projectRef))));
         html = replaceAll(html, '{{INTRO_COPY}}', config.escapeHtml(
             opts.attachFiles ? INTRO_COPY_LINKED_AND_ATTACHED : INTRO_COPY_LINKED));
 
@@ -999,10 +935,10 @@ function (config) {
     }
 
     /**
-     * Literal replace-all. String.prototype.replace with a string pattern replaces
-     * only the first occurrence, and {{PROJECT_REF}} appears three times - once in
-     * the body and once in each of the two CONFIRM DRAWINGS mailto links. Building a
-     * RegExp from the tag would need escaping of the braces, so this is done by hand.
+     * Literal replace-all. String.prototype.replace with a string pattern replaces only
+     * the first occurrence, which is not what substituting a template tag wants - a tag
+     * may legitimately appear more than once. Building a RegExp from the tag would need
+     * the braces escaped, so this is done by hand.
      */
     function replaceAll(haystack, needle, replacement) {
         var out = '';

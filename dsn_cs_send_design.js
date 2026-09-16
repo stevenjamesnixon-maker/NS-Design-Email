@@ -33,7 +33,7 @@ function (currentRecord, url, log) {
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.1.0';
+    var SCRIPT_VERSION = '1.2.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -45,7 +45,7 @@ function (currentRecord, url, log) {
     };
 
     /** Must match config.ATTACHMENT_FIELD_COUNT on the server. */
-    var ATTACHMENT_FIELD_COUNT = 5;
+    var ATTACHMENT_FIELD_COUNT = 10;
 
     function pageInit(context) {
         log.debug('dsn_cs_send_design.pageInit',
