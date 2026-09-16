@@ -48,7 +48,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.4.0';
+    var SCRIPT_VERSION = '1.5.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -67,11 +67,13 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     };
 
     /**
-     * Documents 1 to this number are presented as the everyday case; the rest follow
-     * under a "More documents" heading. Purely presentational - every slot behaves
-     * identically.
+     * Display widths, in characters, for the text inputs. NetSuite sizes a TEXT field to
+     * a default that is too narrow to read an email address or a button label in, so the
+     * ones that carry real content are widened explicitly.
      */
-    var PRIMARY_DOCUMENT_SLOTS = 3;
+    var WIDTH_EMAIL_FIELD = 60;
+    var WIDTH_LABEL_FIELD = 45;
+    var WIDTH_FILE_FIELD  = 45;
 
     /** Sender candidate keys. The form posts one of these, never an employee ID: the
      *  candidates are re-resolved from the record on POST rather than trusted from the
@@ -124,6 +126,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         var form;
         var senderField;
         var contactField;
+        var toField;
+        var ccField;
+        var bccField;
         var noticeHtml;
         var defaultSenderKey;
         var i;
@@ -162,6 +167,10 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
         addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
 
+        // Must happen before the sections are added: it changes how everything after it
+        // is laid out.
+        disableFieldBalancing(form);
+
         addSectionHeading(form, 'email', 'Email',
             'Who the email comes from, and who it goes to.');
 
@@ -197,8 +206,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             });
         }
 
+        // Row 1 of the Email section.
         setRowLayout(senderField, 'start');
-        setRowLayout(contactField, 'mid');
+        setRowLayout(contactField, 'end');
 
         // Contact id -> email, for the client script to read when a contact is picked.
         // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
@@ -207,30 +217,34 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         addHiddenLongText(form, FLD.CONTACT_MAP, 'Contact Emails',
             buildContactEmailMap(data.contacts));
 
-        // --- Recipients: ordinary visible fields ---
-        // To closes the row opened by Send As; CC and BCC form the row below it.
-        setRowLayout(addVisibleText(form, FLD.TO, 'To',
+        // --- Recipients: ordinary visible fields. Row 2 of the Email section. ---
+        // Each still accepts a comma separated list, exactly as before.
+        toField  = addVisibleText(form, FLD.TO, 'To',
             values.to === undefined ? data.customerEmail : values.to,
-            'Separate multiple addresses with commas.'), 'end');
-        setRowLayout(addVisibleText(form, FLD.CC, 'CC', values.cc || '', ''), 'start');
-        setRowLayout(addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '', ''), 'end');
+            'Separate multiple addresses with commas.');
+        ccField  = addVisibleText(form, FLD.CC, 'CC', values.cc || '',
+            'Separate multiple addresses with commas.');
+        bccField = addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '',
+            'Separate multiple addresses with commas.');
+
+        setDisplayWidth(toField,  WIDTH_EMAIL_FIELD, 'To');
+        setDisplayWidth(ccField,  WIDTH_EMAIL_FIELD, 'CC');
+        setDisplayWidth(bccField, WIDTH_EMAIL_FIELD, 'BCC');
+
+        setRowLayout(toField,  'start');
+        setRowLayout(ccField,  'mid');
+        setRowLayout(bccField, 'end');
 
         // --- Documents: file, category and link label per slot ---
         //
         // NOT in field groups. A FILE field cannot go in one - see addDocumentSlot.
+        addSectionHeading(form, 'docs', 'Documents',
+            'One row per document: choose the file, pick a category, and check the ' +
+            'button label the customer will see. All ' +
+            config.ATTACHMENT_FIELD_COUNT + ' rows can be used in any order - ' +
+            'filling row 7 and leaving 4 to 6 empty is fine.');
+
         for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
-            if (i === 1) {
-                addSectionHeading(form, 'docs', 'Documents',
-                    'Attach a document, pick a category, and check the button label ' +
-                    'the customer will see. Leave any slot empty to skip it.');
-            }
-            if (i === PRIMARY_DOCUMENT_SLOTS + 1) {
-                addSectionHeading(form, 'moredocs', 'More documents',
-                    'Slots ' + (PRIMARY_DOCUMENT_SLOTS + 1) + ' to ' +
-                    config.ATTACHMENT_FIELD_COUNT + ', for larger sets. They work ' +
-                    'exactly like the ones above and can be used in any order - ' +
-                    'filling slot 7 and leaving 4 to 6 empty is fine.');
-            }
             addDocumentSlot(form, i, values);
         }
 
@@ -317,11 +331,16 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         var categoryField;
         var labelField;
 
+        // The file field's LABEL carries the row number. NetSuite renders labels in their
+        // own column ahead of the controls, so "Document 7" lines up under "Document 6"
+        // and the number effectively becomes the narrow left-hand column of the table.
+        // There is no native header row, so the labels do that job on every row instead.
         fileField = form.addField({
             id:    FLD.FILE_PREFIX + position,
             type:  serverWidget.FieldType.FILE,
             label: 'Document ' + position
         });
+        setDisplayWidth(fileField, WIDTH_FILE_FIELD, 'Document ' + position + ' file');
 
         // Sourced from the custom list by SCRIPT ID, so the client can add categories
         // without a deployment.
@@ -343,6 +362,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
                   'this in; edit it freely, for example "Design drawings for Flat 1".'
         });
         labelField.defaultValue = slotValue(values, position, 'label');
+        setDisplayWidth(labelField, WIDTH_LABEL_FIELD, 'Document ' + position + ' label');
 
         setRowLayout(fileField, 'start');
         setRowLayout(categoryField, 'mid');
@@ -365,6 +385,80 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         };
 
         setLayoutType(field, layoutTypes[position], 'row position "' + position + '"');
+    }
+
+    /**
+     * Applies a break type, guarded, for the same reason as setLayoutType.
+     */
+    function setBreakType(field, breakType, description) {
+        if (!field || !breakType) { return; }
+
+        try {
+            field.updateBreakType({ breakType: breakType });
+        } catch (e) {
+            log.debug('dsn_sl_send_design.setBreakType',
+                'Could not apply a break type to ' + description + ': ' + e.message +
+                ' - cosmetic only.');
+        }
+    }
+
+    /**
+     * Widens an input. NetSuite's default width for a TEXT field is too narrow to read an
+     * email address or a button label in, and a FILE field's default is too narrow to show
+     * the name of the file somebody just chose.
+     *
+     * Guarded: display size is not supported on every field type, and a field type that
+     * refuses it must not take the form down over a cosmetic setting. A FILE field in
+     * particular may well refuse.
+     */
+    function setDisplayWidth(field, width, description) {
+        if (!field) { return; }
+
+        try {
+            field.updateDisplaySize({ height: 1, width: width });
+        } catch (e) {
+            log.debug('dsn_sl_send_design.setDisplayWidth',
+                'Could not set a display width on ' + description + ': ' + e.message +
+                ' - the field keeps its default width, which is cosmetic only.');
+        }
+    }
+
+    /**
+     * Turns off NetSuite's automatic field balancing for the whole form.
+     *
+     * This is the root cause of the reported layout. Left on, NetSuite distributes main
+     * tab fields across its three-column grid to balance their heights - which is exactly
+     * how the Email section ended up in a narrow column, document slots split between
+     * columns, and Options beside Document 10. No amount of per-field layout fixes that
+     * while the balancer is still redistributing everything around them.
+     *
+     * FieldBreakType.STARTCOL is documented to move its own field into a new column AND to
+     * "disable automatic field balancing if set on any field". It is that side effect that
+     * is wanted here, not the column break - so it is applied to the HIDDEN Opportunity ID
+     * field, where starting a new column is invisible and harmless.
+     *
+     * The Phase 2c brief suggested STARTCOL was the thing to avoid. That is right about
+     * its primary effect and, I think, wrong about its side effect: switching the balancer
+     * off is the one documented lever that addresses the actual cause rather than its
+     * symptoms. If Sandbox shows it misbehaving, the fallback is to move it to the first
+     * visible field, or to drop it and accept the balancer.
+     *
+     * UNVERIFIED: whether a HIDDEN field's break type is honoured at all. If the form
+     * still balances, that is the first thing to test.
+     */
+    function disableFieldBalancing(form) {
+        var field;
+
+        try {
+            field = form.getField({ id: FLD.OPPORTUNITY_ID });
+        } catch (e) {
+            log.debug('dsn_sl_send_design.disableFieldBalancing',
+                'Could not find the field to carry the balancing switch: ' + e.message);
+            return;
+        }
+
+        setBreakType(field, serverWidget.FieldBreakType.STARTCOL,
+            'the automatic field balancing switch');
     }
 
     /**
@@ -414,12 +508,19 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         });
         field.defaultValue = html;
 
-        // OUTSIDEABOVE renders the field across the FULL form width, outside NetSuite's
-        // column grid. Without it a heading is placed into whichever of the three columns
-        // the flow has reached, which is what was landing section headings mid-page and
-        // splitting a section across columns. Spanning the full width also breaks the
-        // column flow at that point, so the next section starts below rather than beside.
-        setLayoutType(field, serverWidget.FieldLayoutType.OUTSIDEABOVE,
+        // OUTSIDE renders the field across the FULL form width, outside NetSuite's column
+        // grid. On its own that was not enough - Phase 2b set OUTSIDEABOVE and sections
+        // still shared columns - because a layout type says WHERE a field sits, not that
+        // a new row begins.
+        //
+        // The missing half is the BREAK type. FieldBreakType.STARTROW "places a field
+        // located outside of a field group on a new row", and is documented to work ONLY
+        // on fields whose layout type is OUTSIDE, OUTSIDEABOVE or OUTSIDEBELOW - which is
+        // precisely this pairing. Setting one without the other does nothing useful, and
+        // that is the likeliest reason the previous attempt did not stack.
+        setLayoutType(field, serverWidget.FieldLayoutType.OUTSIDE,
+            'section heading "' + title + '"');
+        setBreakType(field, serverWidget.FieldBreakType.STARTROW,
             'section heading "' + title + '"');
 
         return field;

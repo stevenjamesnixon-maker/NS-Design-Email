@@ -621,3 +621,119 @@ that the buttons carry the same classes, which is the closest a harness can get 
 **221 assertions across seven suites, all passing.** Three Phase 2a assertions were updated
 where this change deliberately superseded them — the 280px width, the Email row split, and a
 renamed log message.
+
+
+---
+
+## Phase 2c — Send Design form layout
+
+Layout only. `dsn_sl_send_design.js` **1.4.0 → 1.5.0**. Nothing else changed:
+`dsn_cs_send_design.js` stays at 1.2.0 because no field ID moved, and
+`dsn_email_template.js` stays at 1.4.0, untouched.
+
+`node --check` passes on all six files.
+
+### The approach, and why
+
+The previous attempt set section headings to `OUTSIDEABOVE` and stopped there. That was
+half a mechanism. A **layout type** says where a field sits; it does not say that a new row
+begins. The other half is the **break type**: `FieldBreakType.STARTROW` "places a field
+located outside of a field group on a new row", and is documented to work **only** on
+fields whose layout type is `OUTSIDE`, `OUTSIDEABOVE` or `OUTSIDEBELOW`
+([Field.updateBreakType](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4335187732.html),
+[FieldBreakType](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4332670010.html)).
+Setting either without the other achieves nothing, which is the likeliest reason Phase 2b
+did not stack. Section headings now carry **both**.
+
+The second change addresses the actual cause rather than its symptoms. NetSuite spreads
+main-tab fields across three columns because of **automatic field balancing** — it is
+balancing column heights, which is precisely how Email ended up narrow, documents split,
+and Options beside Document 10. No per-field layout setting fixes that while the balancer
+is still redistributing everything around it. `FieldBreakType.STARTCOL` is documented to
+move its own field into a new column **and to disable automatic field balancing if set on
+any field**. It is applied to the **hidden** Opportunity ID field, where starting a column
+is invisible and harmless, purely for that side effect.
+
+**This is where I disagree with the brief.** It listed `STARTCOL` as "probably what to
+avoid rather than use". That is right about its primary effect and, I think, wrong about
+its side effect: switching the balancer off is the one documented lever aimed at the cause.
+It is easy to back out — drop one call — if Sandbox shows it misbehaving.
+
+Also changed: the "More documents" section is gone and all ten slots sit under one
+**Documents** heading; the Email section is two rows (`Send As | Select Contact`, then
+`To | CC | BCC`); text inputs are widened with `updateDisplaySize` because NetSuite's
+default is too narrow to read an email address or a button label in.
+
+There is **no native header row**, so each row's field labels do that job: the file field is
+labelled "Document 7", and every row's other two are labelled "Category" and "Button label".
+NetSuite renders labels in their own column ahead of the controls, so the numbers form the
+narrow left-hand column and the repeated labels line up down the page.
+
+### Acceptance criteria
+
+**Met in the code, pending Sandbox for rendering:**
+
+| Criterion | Status |
+|---|---|
+| Email controls across the top in two rows | Layout types set; order guaranteed |
+| All document controls below the email section | Guaranteed by field order |
+| Ten document rows in numerical order | Verified — contiguous, 1 to 10 |
+| Each desktop row has file, category and label side by side | `STARTROW`/`MIDROW`/`ENDROW` set on all thirty fields |
+| Options below Document 10 | Guaranteed by field order |
+| Send Design and Cancel still work | Unchanged |
+| Contact selection still works | Unchanged — contact map and IDs intact |
+| Files, categories and labels submit against the correct slots | Verified, including slot 7 alone |
+| Blank and non-sequential slots still work | Verified — slots 1 and 9 with a gap |
+| No field ID or business logic changed | Verified — all 38 IDs present, none renamed |
+
+**Prevented by the platform:**
+
+- **A true four-column table with a header row.** A Suitelet form has no header row, so
+  "Document | File | Category | Button Label" cannot appear once at the top. Per-row labels
+  are the closest native equivalent and are what is built.
+- **Guaranteed pixel alignment of column edges.** Rows should align because every row has
+  the same three fields with the same label text, but column widths are the renderer's to
+  decide, not the script's.
+- **Whether the FILE field accepts a row layout or a display width at all.** Still open from
+  Phase 2a, still wrapped in try/catch, still an acceptable degradation to
+  file-on-its-own-line with category and label beside it. Not fought.
+
+This is the fallback acceptance the brief describes, and I would rather say so than present
+the table as done.
+
+### What the harness proved, and what it cannot
+
+**Verified in the harness (38 new assertions):** the layout type and break type given to
+every field; that the three headings are `OUTSIDE` + `STARTROW`; that `STARTCOL` appears on
+the hidden field and on no visible one; page order of every section; that each document
+row's three fields are contiguous and correctly positioned; display widths; that all
+pre-existing field IDs survive; that submission still binds file, category and label to the
+right slot, including non-sequential and blank slots; and that the whole form still renders
+when the FILE field refuses both layout and width.
+
+**Not verifiable here, and the things to look at in Sandbox:**
+
+1. **Whether disabling field balancing actually produces a single stacked column.** This is
+   the crux. If it does not, the form will still spread.
+2. **Whether a HIDDEN field's break type is honoured at all.** If the balancer is still on,
+   this is the first thing to test — move the `STARTCOL` to the first visible field.
+3. **Whether `OUTSIDE` + `STARTROW` puts each heading on its own full-width row.**
+4. **Whether the FILE field honours `STARTROW` and `updateDisplaySize`.**
+5. **Column alignment across ten rows, and how it behaves at narrow widths.**
+
+The harness can prove which layout instruction each field was given. It cannot prove what
+NetSuite's renderer does with them, and no stub can.
+
+### What was NOT done, deliberately
+
+The brief warned against rendering the form as INLINEHTML with raw `<input type="file">`
+elements, and I did not. It is the obvious route to a real table and it would trade the one
+upload mechanism this project has verified by experiment — several native FILE fields
+surviving one POST, including with gaps — for one there is evidence against. I did not reach
+a point where hand-rolled markup looked necessary, so there is no spike to propose: the
+native route produces stacked sections and adjacent controls, and only the header row and
+guaranteed pixel alignment are out of reach.
+
+**261 assertions across eight suites, all passing.** Assertions in two earlier suites were
+updated where this brief deliberately superseded them — the removed "More documents"
+section, the regrouped Email rows, and the heading layout type.
