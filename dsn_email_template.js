@@ -6,14 +6,12 @@
  * @description The installation-drawings email body, lifted from NetSuite email
  *              template 3334 and rendered here with merge tags this project
  *              substitutes itself.
- * @version     1.0.0
+ * @version     1.4.0
  *
  * WHY THE HTML LIVES IN A SCRIPT
  *   Template 3334 cannot be used as a NetSuite template because its merge fields
  *   bind to the CAD Worklist custom record, which is being retired:
- *     ${customrecord.custrecord_cad_opportunity}  -> {{PROJECT_REF}} in body text,
- *                                                    {{PROJECT_REF_URL}} inside the two
- *                                                    CONFIRM DRAWINGS mailto subjects
+ *     ${customrecord.custrecord_cad_opportunity}  -> {{PROJECT_REF}}
  *     ${customrecord.custrecord_cad_proj_eng}     -> {{SENDER_NAME}}
  *     ${customrecord.custrecord_pe_phone}         -> {{SENDER_PHONE}}
  *   The markup is otherwise byte-for-byte the template's own, generated from
@@ -26,8 +24,22 @@
  *   1. The footer sentence hard-coded the role "Project Engineer" and the address
  *      design@nu-heat.co.uk. Both are now tags: the role varies with the sender, and
  *      the address comes from the config library rather than a literal in this string.
- *   2. Nothing else. The CONFIRM DRAWINGS button still points at
- *      customer.support@nu-heat.co.uk and still carries {{PROJECT_REF}} in its subject.
+ *   2. Phase 2a removed the "Confirm your design" block outright - its heading, image,
+ *      body copy and both CONFIRM DRAWINGS buttons. With it went the only use of
+ *      {{PROJECT_REF_URL}}, so that tag and its percent-encoding are gone too;
+ *      {{PROJECT_REF}} remains, in the body text.
+ *
+ * {{DELIVERY_CONTACT}}
+ *   Completes the delivery-booking sentence, addressing the customer from the sender
+ *   ("calling me on ...") and falling back to the Customer Support Team when the sender
+ *   has no office phone. That fallback deliberately differs from the footer's, which
+ *   drops its phone instead - see buildDeliveryContact for why.
+ *
+ * PHASE 2 TAGS
+ *   {{INTRO_COPY}}      replaces the fixed sentence "Please find your bespoke
+ *                       installation drawings attached", which stops being true once
+ *                       nothing is attached. Two variants, selected by options.attachFiles.
+ *   {{DOCUMENT_LINKS}}  one branded CTA button per document, labelled by the user.
  *
  * THE PHONE CLAUSE
  *   When the sender has no officephone the phrase " or {{SENDER_PHONE}}" is removed
@@ -43,11 +55,17 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.0.0';
+    var TEMPLATE_VERSION = '1.4.0';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
      * template markup exactly, so it is asserted at build time by buildBody().
+     *
+     * THE FOOTER DROPS ITS PHONE; THE DELIVERY LINE SUBSTITUTES ONE. The two rules look
+     * inconsistent, and the difference is deliberate - see buildDeliveryContact below.
+     * In short: this one is the sender's PERSONAL contact, for which there is no honest
+     * substitute, so it is dropped. The delivery line is about a COMPANY FUNCTION that
+     * somebody else really does perform, so it falls back to them.
      */
     var PHONE_CLAUSE = ' or {{SENDER_PHONE}}';
 
@@ -399,10 +417,11 @@ function (config) {
         '</table>',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
-        '<td valign="top" style="padding-top:20px;padding-right:10px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">Please find your bespoke installation drawings attached.</span></p></div>',
+        '<td valign="top" style="padding-top:20px;padding-right:10px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">{{INTRO_COPY}}</span></p></div>',
         '</td>',
         '</tr>',
         '</table>',
+        '{{DOCUMENT_LINKS}}',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
         '<td valign="top" style="padding-right:10px;padding-left:10px;"><div><h3 style="font-family:Georgia, Times, Times New Roman, serif;font-size:15px;color:#000000;font-weight:normal;line-height:15px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:0px;text-align:left;padding:0;margin:0;">&nbsp;</h3></div>',
@@ -423,78 +442,7 @@ function (config) {
         '</table>',
         '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
         '<tr>',
-        '<td valign="top" style="padding-right:10px;padding-bottom:20px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you haven\'t already booked your delivery, you can confirm your slot by calling our Customer Support Team on <a href="tel:01404540748" target="_blank" style="text-decoration:underline !important;color:#59315f !important;"><font style="color:#59315f;">01404 540748</font></a>.</span></p></div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%" bgcolor="#d8d8d8" style="background-color:#d8d8d8;">',
-        '<tr>',
-        '<td valign="top">',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" style="padding-top:15px;padding-right:10px;padding-bottom:15px;padding-left:10px;"><div><h1 style="font-family:Calibri, Arial, sans-serif;font-size:31px;color:#59315f;font-weight:normal;line-height:35px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:center;padding:0;margin:0;"><span class="mso-font-fix-arial"><b>Confirm your design</b></span></h1></div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" align="center" style="padding-bottom:10px;"><!--[if gte mso 9]><table width="144" cellpadding="0" cellspacing="0"><tr><td><![endif]-->',
-        '<table cellpadding="0" cellspacing="0" border="0" class="img-wrap" style="max-width:100%;">',
-        '<tr>',
-        '<td valign="top" align="center"><a href="https://www.nu-heat.co.uk/request-design-changes/" class="imglink" target="_blank">',
-        '<img src="https://images.chamaileon.io/5b1fac592f38b800113c85ca/5ca8626420e2346b3ee9a013/1698665508018_Design.png" width="144" height="144" alt="Request changes" border="0" style="display:block;font-size:14px;max-width:100%;height:auto;" class="width144" />',
-        '</a>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<!--[if gte mso 9]></td></tr></table><![endif]-->',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" style="padding-top:5px;padding-right:20px;padding-bottom:20px;padding-left:20px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:center;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you\'re happy with your installation drawings, please let us know by clicking below.</span></p></div>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '<table cellpadding="0" cellspacing="0" border="0" width="100%">',
-        '<tr>',
-        '<td valign="top" align="center" style="padding-right:20px;padding-bottom:20px;padding-left:20px;">',
-        '<!--[if !mso]><!-- -->',
-        '<a href="mailto:customer.support@nu-heat.co.uk?subject=Confirmation%20of%20pre-installation%20drawings%20for%3A%20{{PROJECT_REF_URL}}&body=Hello%2C%20%0A%0AI%20would%20like%20to%20confirm%20that%20I%20am%20happy%20with%20my%20installation%20drawings.%20" style="display:inline-block; text-decoration:none;" class="fluid-on-mobile">',
-        '<span>',
-        '<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">',
-        '<tr>',
-        '<td align="center" style="padding:15px;">',
-        '<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">',
-        '<font style="color:#3e3b39;" class="button">',
-        '<span><strong>CONFIRM DRAWINGS</strong></span>',
-        '</font>',
-        '</span>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '</span>',
-        '</a>',
-        '<!--<![endif]-->',
-        '<div style="display:none; mso-hide: none;">',
-        '<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">',
-        '<tr>',
-        '<td align="center" style="padding:15px;">',
-        '<a href="mailto:customer.support@nu-heat.co.uk?subject=Confirmation%20of%20pre-installation%20drawings%20for%3A%20{{PROJECT_REF_URL}}&body=Hello%2C%20%0A%0AI%20would%20like%20to%20confirm%20that%20I%20am%20happy%20with%20my%20installation%20drawings.%20" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">',
-        '<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">',
-        '<font style="color:#3e3b39;" class="button">',
-        '<span><strong>CONFIRM DRAWINGS</strong></span>',
-        '</font>',
-        '</span>',
-        '</a>',
-        '</td>',
-        '</tr>',
-        '</table>',
-        '</div>',
-        '</td>',
-        '</tr>',
-        '</table>',
+        '<td valign="top" style="padding-right:10px;padding-bottom:20px;padding-left:10px;"><div style="font-family:Calibri, Arial, sans-serif;font-size:19px;color:#000000;font-weight:normal;line-height:24px;mso-line-height-rule:exactly;letter-spacing:normal;mso-text-raise:2px;text-align:left;"><p style="padding:0;margin:0;"><span class="mso-font-fix-arial">If you haven\'t already booked your delivery, you can confirm your slot by {{DELIVERY_CONTACT}}.</span></p></div>',
         '</td>',
         '</tr>',
         '</table>',
@@ -838,6 +786,185 @@ function (config) {
     ];
 
     /**
+     * Body copy for the paragraph that used to read "Please find your bespoke
+     * installation drawings attached." That sentence is untrue once nothing is
+     * attached, so there are two variants and the caller picks by the checkbox.
+     */
+    var INTRO_COPY_LINKED =
+        'Your bespoke installation drawings are ready. Please use the buttons below to ' +
+        'open each document.';
+
+    /**
+     * Document buttons are the email's full content width - the same width as the hero
+     * image above them - rather than a width of their own.
+     *
+     * This reuses the template's OWN classes rather than inventing a size:
+     *   .width600         600px on desktop, 100% below 599px  (the hero image's class)
+     *   .fluid-on-mobile  100% on mobile
+     * so the buttons track the image at both sizes, and if the template's content width
+     * ever changes the buttons follow it without being touched.
+     *
+     * The pixel value is still written as BOTH a width attribute and a CSS width, because
+     * Outlook honours the attribute and most other clients the style; max-width:100% lets
+     * the mobile rules take over. Equal width then comes for free - every button is the
+     * content width, so no label can make one wider than another.
+     */
+    var CONTENT_WIDTH_PX = 600;
+
+    /** The classes the hero image uses, so the buttons match it at every size. */
+    var FULL_WIDTH_CLASSES = 'width600 fluid-on-mobile';
+
+    var INTRO_COPY_LINKED_AND_ATTACHED =
+        'Please find your bespoke installation drawings attached. They are also ' +
+        'available using the buttons below.';
+
+    /**
+     * The clause completing "...you can confirm your slot by ___."
+     *
+     * With a sender phone:  calling me on 01404 222333
+     * Without:              calling our Customer Support Team on 01404 540748
+     *
+     * WHY THIS FALLS BACK WHERE THE FOOTER DROPS. The footer's phone clause is removed
+     * entirely when the sender has no office phone (see PHONE_CLAUSE above), and it would
+     * be easy to read these two rules as an inconsistency to be tidied up. They are not.
+     *
+     *   - The FOOTER phone is the sender's PERSONAL contact - "contact your Project
+     *     Engineer, NAME, on ___". Nobody else can stand in for it. Substituting a
+     *     switchboard number there would be a small lie, and Phase 0 rejected exactly
+     *     that ("Your Account Manager" on the main number). So it is dropped, and the
+     *     sentence still reads correctly without it.
+     *
+     *   - This line is about BOOKING A DELIVERY, which the Customer Support Team
+     *     genuinely does. The fallback is not a substitute for the sender; it is the
+     *     correct destination for that task, and was the original wording of this line.
+     *     Dropping the sentence would leave a customer unable to book a delivery because
+     *     an employee record had an empty field - a worse outcome by far than a sentence
+     *     that is slightly less personal.
+     *
+     * The rule, if it is ever needed for a third case: substitute when the fallback is a
+     * real answer to the customer's question; drop when it would only be pretending.
+     *
+     * The sender's phone is whatever buildBody was given - already resolved once, by the
+     * sales rep / project engineer rules, for the footer. It is not resolved again here.
+     *
+     * @param {string} senderPhone  the sender's officephone, or '' 
+     * @returns {string} HTML for the clause, with no trailing full stop
+     */
+    function buildDeliveryContact(senderPhone) {
+        var phone = trimOrEmpty(senderPhone);
+
+        if (phone) {
+            return 'calling me on ' + buildTelLink(phone);
+        }
+
+        return 'calling our Customer Support Team on ' +
+               buildTelLink(config.CUSTOMER_SUPPORT_PHONE);
+    }
+
+    /**
+     * A phone number as a tel: link, styled as the template's own links are.
+     *
+     * The href keeps only digits and a leading +, because a tel: URI cannot carry the
+     * spaces a readable number is written with. The visible text keeps the number
+     * exactly as the employee record holds it.
+     */
+    function buildTelLink(phoneNumber) {
+        var visible = config.escapeHtml(trimOrEmpty(phoneNumber));
+        var dialable = trimOrEmpty(phoneNumber).replace(/[^0-9+]/g, '');
+
+        return '<a href="tel:' + config.escapeHtml(dialable) + '" target="_blank" ' +
+               'style="text-decoration:underline !important;color:#59315f !important;">' +
+               '<font style="color:#59315f;">' + visible + '</font></a>';
+    }
+
+    /**
+     * Builds the CTA buttons for {{DOCUMENT_LINKS}}.
+     *
+     * The markup is copied from the CONFIRM DRAWINGS button that this template used to
+     * carry (removed in Phase 2a), INCLUDING its MSO conditional pair:
+     *
+     *   <!--[if !mso]><!-- -->   ... anchor-wrapped table, for everything else
+     *   <!--<![endif]-->
+     *   <div style="display:none; mso-hide: none;">  ... the Outlook fallback
+     *
+     * Both halves are required. Without the conditional, Outlook renders BOTH and the
+     * button appears twice - which is why the pattern is in the original template, and
+     * why it is reproduced here rather than simplified.
+     *
+     * @param {Array<Object>} documents  [{ label, url }]
+     * @returns {string} HTML, or '' when there are no documents
+     */
+    function buildDocumentLinks(documents) {
+        var html = [];
+        var i;
+        var label;
+        var href;
+
+        if (!documents || documents.length === 0) { return ''; }
+
+        html.push('<table cellpadding="0" cellspacing="0" border="0" width="100%">');
+
+        for (i = 0; i < documents.length; i++) {
+            // The label is user-entered free text and goes into element content.
+            label = config.escapeHtml(trimOrEmpty(documents[i].label));
+
+            // The URL goes into an href. It is HTML-escaped - which turns the query
+            // string's "&" into "&amp;" as an href requires - and NOT percent-encoded:
+            // File.url is already a URL with an already-encoded query string, so
+            // encoding it again would corrupt every link.
+            href = config.escapeHtml(trimOrEmpty(documents[i].url));
+
+            html.push('<tr>');
+            // No horizontal padding: the hero image's cell has none either, so the
+            // button lines up with the image edge for edge rather than sitting inset.
+            html.push('<td valign="top" align="center" style="padding-bottom:12px;">');
+
+            // Everything except Outlook.
+            html.push('<!--[if !mso]><!-- -->');
+            html.push('<a href="' + href + '" style="display:block; text-decoration:none; width:' + CONTENT_WIDTH_PX + 'px; max-width:100%;" class="' + FULL_WIDTH_CLASSES + '">');
+            html.push('<span>');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + CONTENT_WIDTH_PX + '" bgcolor="#ffb500" class="' + FULL_WIDTH_CLASSES + '" style="width:' + CONTENT_WIDTH_PX + 'px;max-width:100%;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<tr>');
+            html.push('<td align="center" style="padding:15px;text-align:center;word-wrap:break-word;">');
+            html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
+            html.push('<font style="color:#3e3b39;" class="button">');
+            html.push('<span><strong>' + label + '</strong></span>');
+            html.push('</font>');
+            html.push('</span>');
+            html.push('</td>');
+            html.push('</tr>');
+            html.push('</table>');
+            html.push('</span>');
+            html.push('</a>');
+            html.push('<!--<![endif]-->');
+
+            // Outlook only.
+            html.push('<div style="display:none; mso-hide: none;">');
+            html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + CONTENT_WIDTH_PX + '" bgcolor="#ffb500" class="' + FULL_WIDTH_CLASSES + '" style="width:' + CONTENT_WIDTH_PX + 'px;max-width:100%;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
+            html.push('<tr>');
+            html.push('<td align="center" style="padding:15px;text-align:center;word-wrap:break-word;">');
+            html.push('<a href="' + href + '" style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;text-decoration:none;text-align:center;">');
+            html.push('<span style="color:#3e3b39 !important;font-family:Calibri, Arial, sans-serif;font-size:18px;mso-line-height:exactly;line-height:22px;mso-text-raise:2px;letter-spacing: normal;">');
+            html.push('<font style="color:#3e3b39;" class="button">');
+            html.push('<span><strong>' + label + '</strong></span>');
+            html.push('</font>');
+            html.push('</span>');
+            html.push('</a>');
+            html.push('</td>');
+            html.push('</tr>');
+            html.push('</table>');
+            html.push('</div>');
+
+            html.push('</td>');
+            html.push('</tr>');
+        }
+
+        html.push('</table>');
+
+        return html.join('\n');
+    }
+
+    /**
      * Builds the email body.
      *
      * @param {Object} options
@@ -847,7 +974,13 @@ function (config) {
      * @param {string} options.senderEmail  the address PRINTED in the body, which for
      *                                      a project engineer is the shared design
      *                                      mailbox and not their own address
-     * @param {string} options.senderPhone  officephone, or '' to drop the clause
+     * @param {string} options.senderPhone  officephone, or ''. Drives BOTH the footer
+     *                                       clause (dropped when blank) and the delivery
+     *                                       line (falls back when blank), from this one
+     *                                       already-resolved value.
+     * @param {Array<Object>} options.documents  [{ label, url }] rendered as CTA buttons
+     * @param {boolean} options.attachFiles  true when the files are also attached, which
+     *                                       selects the body copy
      * @returns {string} the complete HTML body
      */
     function buildBody(options) {
@@ -868,12 +1001,18 @@ function (config) {
             html = replaceAll(html, PHONE_CLAUSE, '');
         }
 
-        // {{PROJECT_REF}} sits in body text; {{PROJECT_REF_URL}} sits inside the two
-        // CONFIRM DRAWINGS mailto query strings. A reference like "OPP123 - 12 High St"
-        // contains spaces and may contain '&', either of which breaks a mailto href if
-        // it is only HTML-escaped, so the URL occurrences are percent-encoded instead.
-        html = replaceAll(html, '{{PROJECT_REF_URL}}',
-            config.escapeHtml(encodeURIComponent(trimOrEmpty(opts.projectRef))));
+        // Generated markup (it carries a tel: link), so inserted as-is; its only variable
+        // part is a phone number, escaped inside buildTelLink.
+        html = replaceAll(html, '{{DELIVERY_CONTACT}}',
+            buildDeliveryContact(opts.senderPhone));
+
+        html = replaceAll(html, '{{INTRO_COPY}}', config.escapeHtml(
+            opts.attachFiles ? INTRO_COPY_LINKED_AND_ATTACHED : INTRO_COPY_LINKED));
+
+        // Generated markup, so it is inserted as-is. Its user-supplied parts - the
+        // labels - are escaped inside buildDocumentLinks, not here.
+        html = replaceAll(html, '{{DOCUMENT_LINKS}}', buildDocumentLinks(opts.documents));
+
         html = replaceAll(html, '{{PROJECT_REF}}', config.escapeHtml(opts.projectRef));
         html = replaceAll(html, '{{SENDER_ROLE}}', config.escapeHtml(opts.senderRole));
         html = replaceAll(html, '{{SENDER_NAME}}', config.escapeHtml(opts.senderName));
@@ -884,10 +1023,10 @@ function (config) {
     }
 
     /**
-     * Literal replace-all. String.prototype.replace with a string pattern replaces
-     * only the first occurrence, and {{PROJECT_REF}} appears three times - once in
-     * the body and once in each of the two CONFIRM DRAWINGS mailto links. Building a
-     * RegExp from the tag would need escaping of the braces, so this is done by hand.
+     * Literal replace-all. String.prototype.replace with a string pattern replaces only
+     * the first occurrence, which is not what substituting a template tag wants - a tag
+     * may legitimately appear more than once. Building a RegExp from the tag would need
+     * the braces escaped, so this is done by hand.
      */
     function replaceAll(haystack, needle, replacement) {
         var out = '';
@@ -908,8 +1047,9 @@ function (config) {
     }
 
     return {
-        TEMPLATE_VERSION: TEMPLATE_VERSION,
-        buildBody:        buildBody
+        TEMPLATE_VERSION:    TEMPLATE_VERSION,
+        buildBody:           buildBody,
+        buildDocumentLinks:  buildDocumentLinks
     };
 
 });

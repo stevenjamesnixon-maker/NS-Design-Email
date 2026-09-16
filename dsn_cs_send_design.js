@@ -7,7 +7,7 @@
  * @description Client script for the Send Design Suitelet form. Two jobs: fill the To
  *              field when a contact is chosen, and return to the Opportunity when
  *              Cancel is pressed.
- * @version     1.0.0
+ * @version     1.2.0
  *
  * NO SCRIPT RECORD.
  *   Attached to the form by dsn_sl_send_design.js via form.clientScriptModulePath, and
@@ -19,6 +19,10 @@
  *   populates To" is client-side by definition. The alternative - an inline <script>
  *   writing to the DOM - is the pattern this project rejected for Send Quote.
  *
+ * PHASE 2
+ *   Also pre-fills each document's button label from its chosen category. The user may
+ *   then edit it freely; the server falls back to the category name if they clear it.
+ *
  * THIS SCRIPT DOES NOT VALIDATE.
  *   Every check runs server-side on POST, against what was actually submitted. Nothing
  *   here can be bypassed to reach email.send, because nothing here is what guards it.
@@ -29,14 +33,19 @@ function (currentRecord, url, log) {
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.0.0';
+    var SCRIPT_VERSION = '1.2.0';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
         CONTACT:        'custpage_dsn_contact',
-        CONTACT_MAP:    'custpage_dsn_contact_map',
-        TO:             'custpage_dsn_to'
+        CONTACT_MAP:     'custpage_dsn_contact_map',
+        TO:              'custpage_dsn_to',
+        CATEGORY_PREFIX: 'custpage_dsn_category_',
+        LABEL_PREFIX:    'custpage_dsn_label_'
     };
+
+    /** Must match config.ATTACHMENT_FIELD_COUNT on the server. */
+    var ATTACHMENT_FIELD_COUNT = 10;
 
     function pageInit(context) {
         log.debug('dsn_cs_send_design.pageInit',
@@ -55,6 +64,11 @@ function (currentRecord, url, log) {
         var contactId;
         var emailsByContactId;
         var address;
+
+        if (isCategoryField(context.fieldId)) {
+            fillLabelFromCategory(context.currentRecord, context.fieldId);
+            return;
+        }
 
         if (context.fieldId !== FLD.CONTACT) { return; }
 
@@ -79,6 +93,52 @@ function (currentRecord, url, log) {
         } catch (e) {
             log.error('dsn_cs_send_design.fieldChanged',
                 'Could not fill To from the selected contact: ' + e.message);
+        }
+    }
+
+    function isCategoryField(fieldId) {
+        var i;
+        for (i = 1; i <= ATTACHMENT_FIELD_COUNT; i++) {
+            if (fieldId === FLD.CATEGORY_PREFIX + i) { return true; }
+        }
+        return false;
+    }
+
+    /**
+     * Pre-fills a document's button label from the category just chosen.
+     *
+     * The label is then the user's to edit freely - "Design drawings for Flat 1",
+     * "Useful information: plant room". One editable field rather than a category plus a
+     * separate suffix, so there are no joining rules and no ambiguity about what the
+     * customer ends up seeing on the button.
+     *
+     * The category's DISPLAY TEXT is used, not its internal ID. getText is what returns
+     * it; getValue would put a number on the button.
+     *
+     * An existing label is overwritten, because changing the category is a deliberate
+     * act and the old label would usually now be wrong. Clearing the category leaves the
+     * label alone - the user may have typed something they want to keep, and the server
+     * falls back to the category name only when the label is empty.
+     */
+    function fillLabelFromCategory(rec, categoryFieldId) {
+        var position = categoryFieldId.substring(FLD.CATEGORY_PREFIX.length);
+        var categoryText;
+
+        try {
+            categoryText = rec.getText({ fieldId: categoryFieldId });
+
+            if (!categoryText) { return; }
+
+            rec.setValue({
+                fieldId: FLD.LABEL_PREFIX + position,
+                value:   categoryText
+            });
+
+        } catch (e) {
+            log.error('dsn_cs_send_design.fillLabelFromCategory',
+                'Could not pre-fill the label for document ' + position + ': ' + e.message +
+                ' - the user can still type one, and the server falls back to the ' +
+                'category name.');
         }
     }
 

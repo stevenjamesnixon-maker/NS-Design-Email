@@ -5,16 +5,20 @@
  *
  * @name        Design Send - Send Design Suitelet
  * @description Builds the Send Design form for an Opportunity (sender, recipients and
- *              up to five drawings), then saves the drawings to the File Cabinet and
- *              sends the installation-drawings email from the chosen sender.
- * @version     1.0.0
+ *              up to ten documents), then saves them to the File Cabinet, publishes them
+ *              and sends the installation-drawings email from the chosen sender.
+ *
+ *              From 1.6.0 the GET renders a hand-written HTML page rather than a
+ *              serverWidget form. See docs/phase-2-links.md, attempt 5 - in particular
+ *              the multipart upload risk that change reintroduces.
+ * @version     1.6.1
  *
  * Script ID:      customscript_dsn_sl_send_design
  * Deployment ID:  customdeploy_dsn_sl_send_design
  *
  * Script parameters on this record:
  *   custscript_dsn_salesrep_default_props - value proposition IDs defaulting to the
- *                                           sales rep
+ *                    sales rep
  *   custscript_dsn_attachment_folder      - File Cabinet folder for saved drawings
  *
  * HELPER LINEAGE
@@ -48,7 +52,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.0.0';
+    var SCRIPT_VERSION = '1.6.1';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -59,8 +63,13 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         CC:             'custpage_dsn_cc',
         BCC:            'custpage_dsn_bcc',
         CONTACT_MAP:    'custpage_dsn_contact_map',
-        FILE_PREFIX:    'custpage_dsn_file_'
+        FILE_PREFIX:     'custpage_dsn_file_',
+        CATEGORY_PREFIX: 'custpage_dsn_category_',
+        LABEL_PREFIX:    'custpage_dsn_label_',
+        ATTACH_TOO:      'custpage_dsn_attach_too',
+        HEADING_PREFIX:  'custpage_dsn_heading_'
     };
+
 
     /** Sender candidate keys. The form posts one of these, never an employee ID: the
      *  candidates are re-resolved from the record on POST rather than trusted from the
@@ -69,7 +78,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     var SENDER_PROJECT_ENGINEER = 'pe';
     var SENDER_CURRENT_USER = 'user';
 
-    // --- Entry point ---------------------------------------------------------
+    // --- Entry point ----
 
     function onRequest(context) {
         var opportunityId;
@@ -96,7 +105,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         }
     }
 
-    // --- GET: build the form -------------------------------------------------
+    // --- GET: build the form ----
 
     /**
      * @param {Object} context
@@ -105,117 +114,189 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      * @param {Array<string>} [options.errors] messages to show in a banner
      * @param {Object} [options.values] previously submitted sender/to/cc/bcc to restore
      */
+    /**
+     * Standalone HTML renderer. No native controls or NetSuite DOM selectors.
+     * Retains the existing POST field names and server-side send pipeline.
+     * Sandbox verification required for multipart handling and deployment security.
+     */
     function showForm(context, opportunityId, options) {
         var opts = options || {};
         var values = opts.values || {};
-        var errors = opts.errors || [];
-        var data;
-        var form;
-        var senderField;
-        var contactField;
-        var noticeHtml;
-        var defaultSenderKey;
-        var i;
-
         if (!opportunityId) {
             showMessagePage(context, 'No Opportunity',
-                'No Opportunity ID was supplied. Please open this page using the ' +
-                'Send Design button on an Opportunity record.', '');
+                'Open Send Design from an Opportunity record.', '');
             return;
         }
-
-        data = loadOpportunityContext(opportunityId);
-
-        if (data.candidates.length === 0) {
-            // Unreachable in practice - the current user is always a candidate - but a
-            // form with an empty sender list would send from nobody.
+        var data = loadOpportunityContext(opportunityId);
+        if (!data.candidates.length) {
             showMessagePage(context, 'No available sender',
-                'No sender could be resolved for this Opportunity. The sales rep, the ' +
-                'project engineer and the current user all failed to load. Please check ' +
-                'the execution log.', opportunityId);
+                'No sender could be resolved. Please check the execution log.', opportunityId);
             return;
         }
 
-        form = serverWidget.createForm({ title: 'Send Design' });
-
-        defaultSenderKey = values.senderKey || data.defaultSenderKey;
-
-        noticeHtml = buildNoticeHtml(data, errors);
-        if (noticeHtml) {
-            form.addField({
-                id:    FLD.NOTICE,
-                type:  serverWidget.FieldType.INLINEHTML,
-                label: ' '
-            }).defaultValue = noticeHtml;
-        }
-
-        addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
-
-        // --- Sender ---
-        senderField = form.addField({
-            id:    FLD.SENDER,
-            type:  serverWidget.FieldType.SELECT,
-            label: 'Send As'
-        });
-        senderField.isMandatory = true;
-        for (i = 0; i < data.candidates.length; i++) {
-            senderField.addSelectOption({
-                value:      data.candidates[i].key,
-                text:       buildSenderLabel(data.candidates[i]),
-                isSelected: data.candidates[i].key === defaultSenderKey
+        // Read the configured custom list; never hard-code category IDs or labels.
+        // Fail visibly rather than rendering an apparently valid empty dropdown.
+        var categories = [];
+        search.create({
+            type: config.LINK_CATEGORY_LIST,
+            columns: ['internalid', 'name']
+        }).run().each(function (result) {
+            categories.push({
+                id: String(result.getValue({ name: 'internalid' })),
+                name: String(result.getValue({ name: 'name' }) || '')
             });
-        }
-
-        // --- Contact selector ---
-        // Options are keyed on the contact's INTERNAL ID. Send Quote keys them on the
-        // email address, so every contact without one gets value '' - the same value as
-        // the placeholder - and becomes unselectable.
-        contactField = form.addField({
-            id:    FLD.CONTACT,
-            type:  serverWidget.FieldType.SELECT,
-            label: 'Select Contact'
-        });
-        contactField.addSelectOption({ value: '', text: '-- Select a contact to fill To --' });
-        for (i = 0; i < data.contacts.length; i++) {
-            contactField.addSelectOption({
-                value: data.contacts[i].id,
-                text:  buildContactLabel(data.contacts[i])
-            });
-        }
-
-        // Contact id -> email, for the client script to read when a contact is picked.
-        // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
-        // reads it with rec.getValue and writes the To field with rec.setValue, so the
-        // record model stays the single source of truth throughout.
-        addHiddenLongText(form, FLD.CONTACT_MAP, 'Contact Emails',
-            buildContactEmailMap(data.contacts));
-
-        // --- Recipients: ordinary visible fields ---
-        addVisibleText(form, FLD.TO, 'To',
-            values.to === undefined ? data.customerEmail : values.to,
-            'Separate multiple addresses with commas.');
-        addVisibleText(form, FLD.CC, 'CC', values.cc || '', '');
-        addVisibleText(form, FLD.BCC, 'BCC', values.bcc || '', '');
-
-        // --- Attachments ---
-        for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
-            form.addField({
-                id:    FLD.FILE_PREFIX + i,
-                type:  serverWidget.FieldType.FILE,
-                label: 'Attachment ' + i
-            });
-        }
-
-        form.addSubmitButton({ label: 'Send Design' });
-        form.addButton({
-            id:           'custpage_dsn_cancel',
-            label:        'Cancel',
-            functionName: 'dsnCancel'
+            return true;
         });
 
-        form.clientScriptModulePath = './dsn_cs_send_design.js';
+        // Local escaping covers both HTML text and quoted attributes.
+        function esc(value) {
+            return String(value == null ? '' : value)
+                .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+        function attrs(id) {
+            return ' id="' + esc(id) + '" name="' + esc(id) + '"';
+        }
+        function option(value, text, selected, extra) {
+            return '<option value="' + esc(value) + '"' +
+                (String(value) === String(selected) ? ' selected' : '') +
+                (extra || '') + '>' + esc(text) + '</option>';
+        }
+        function textBox(id, title, value, required) {
+            return '<label>' + esc(title) + '<input type="text"' + attrs(id) +
+                ' value="' + esc(value) + '"' + (required ? ' required' : '') +
+                '></label>';
+        }
 
-        context.response.writePage(form);
+        var backUrl = url.resolveRecord({
+            recordType: 'opportunity', recordId: opportunityId, isEditMode: false
+        });
+        var senderKey = values.senderKey || data.defaultSenderKey;
+        var html = [];
+        html.push('<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+            '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+            '<title>Send Design</title><style>' +
+            '*{box-sizing:border-box}body{margin:0;background:#f4f6f8;color:#243444;font:14px Arial,sans-serif}' +
+            'main{padding:24px;width:100%}h1{margin:0 0 16px;font-size:26px}' +
+            'section{background:white;border:1px solid #d6dfe5;border-top:3px solid #00857d;border-radius:5px;padding:20px;margin:20px 0}' +
+            'h2{font-size:18px;color:#00776f;margin:0 0 12px}p{color:#526373;line-height:1.5}' +
+            '.grid{display:grid;gap:20px;margin:16px 0}.two{grid-template-columns:repeat(2,minmax(0,1fr))}' +
+            '.three{grid-template-columns:repeat(3,minmax(0,1fr))}' +
+            'label{display:block;font-weight:600;min-width:0}' +
+            'input[type=text],select{display:block;width:100%;min-width:0;margin-top:7px;padding:9px;border:1px solid #aebdc8;border-radius:4px;background:white;font:inherit;color:inherit}' +
+            'input[type=file]{display:block;width:100%;min-width:0;font:inherit}' +
+            'input:focus,select:focus,a:focus,button:focus{outline:2px solid #00857d;outline-offset:2px}' +
+            '.scroll{overflow-x:auto}table{width:100%;min-width:850px;border-collapse:collapse;table-layout:fixed}' +
+            'th,td{text-align:left;padding:12px;border-bottom:1px solid #dce4e9;vertical-align:middle}' +
+            'thead{background:#eef5f5}tbody tr:nth-child(even){background:#f8fafb}' +
+            'td input[type=text],td select{margin:0}.actions{display:flex;gap:12px;align-items:center}' +
+            'button,.cancel{padding:10px 20px;border-radius:4px;border:1px solid #aebdc8;font:inherit;cursor:pointer;text-decoration:none}' +
+            'button{background:#007c74;color:white;border-color:#007c74}.cancel{background:white;color:#243444}' +
+            'button:disabled{opacity:.65;cursor:wait}.check{display:flex;gap:10px;align-items:center}' +
+            '.check input{margin:0}small{color:#657786}' +
+            '@media(max-width:760px){main{padding:12px}.two,.three{grid-template-columns:1fr}section{padding:14px}}' +
+            '</style></head><body><main><h1>Send Design</h1>');
+        html.push(buildNoticeHtml(data, opts.errors || []));
+
+        // KNOWN DEPENDENCY: the form has no action, so the browser posts to the CURRENT
+        // URL including its query string - which is what carries script and deploy and
+        // routes the POST back to this Suitelet.
+        //
+        // That works, and uploads are confirmed working in Sandbox through it. But it
+        // depends on the address bar rather than on anything this page states, so it would
+        // break if the page were ever reached by a redirect that dropped the query.
+        //
+        // Deliberately NOT defended against with an explicit action: that failure is loud
+        // and already handled - without an opportunityId the POST lands on the "No
+        // Opportunity ... nothing was sent" page - so a defence is not justified. Recorded
+        // so the cause is obvious if it ever happens.
+        html.push('<form id="dsn-html-form" method="post" enctype="multipart/form-data">');
+        html.push('<input type="hidden"' + attrs(FLD.OPPORTUNITY_ID) +
+            ' value="' + esc(opportunityId) + '">');
+        html.push('<div class="actions"><button type="submit">Send Design</button>' +
+            '<a class="cancel" href="' + esc(backUrl) + '">Cancel</a>' +
+            '<small>v' + esc(SCRIPT_VERSION) + '</small></div>');
+        html.push('<section><h2>Email</h2><div class="grid two">' +
+            '<label>Send As<select' + attrs(FLD.SENDER) + ' required>');
+        data.candidates.forEach(function (candidate) {
+            html.push(option(candidate.key, buildSenderLabel(candidate), senderKey));
+        });
+        html.push('</select></label><label>Select Contact<select' + attrs(FLD.CONTACT) + '>');
+        html.push(option('', '-- Select a contact to fill To --', ''));
+        data.contacts.forEach(function (contact) {
+            html.push(option(contact.id, buildContactLabel(contact), '',
+                ' data-email="' + esc(contact.email || '') + '"'));
+        });
+        html.push('</select></label></div><div class="grid three">');
+        html.push(textBox(FLD.TO, 'To', values.to === undefined ? data.customerEmail : values.to, true));
+        html.push(textBox(FLD.CC, 'CC', values.cc || '', false));
+        html.push(textBox(FLD.BCC, 'BCC', values.bcc || '', false));
+        html.push('</div><p>Separate multiple addresses with commas.</p></section>');
+        html.push('<section><h2>Documents</h2><p>Choose a file, category and button label on each row. ' +
+            'You may use any of the ' + esc(config.ATTACHMENT_FIELD_COUNT) +
+            ' rows; unused rows can be left blank.</p><div class="scroll"><table>' +
+            '<colgroup><col style="width:12%"><col style="width:32%"><col style="width:24%"><col style="width:32%"></colgroup>' +
+            '<thead><tr><th scope="col">Document</th><th scope="col">File</th>' +
+            '<th scope="col">Category</th><th scope="col">Button Label</th></tr></thead><tbody>');
+        for (var i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
+            html.push('<tr><th scope="row">Document ' + i + '</th><td><input type="file"' +
+                attrs(FLD.FILE_PREFIX + i) + ' aria-label="Document ' + i + ' file"></td><td><select' +
+                attrs(FLD.CATEGORY_PREFIX + i) + ' data-label-target="' + esc(FLD.LABEL_PREFIX + i) +
+                '" aria-label="Document ' + i + ' category">');
+            var selected = slotValue(values, i, 'category');
+            html.push(option('', '-- Select category --', selected));
+            categories.forEach(function (category) {
+                html.push(option(category.id, category.name, selected));
+            });
+            html.push('</select></td><td><input type="text"' + attrs(FLD.LABEL_PREFIX + i) +
+                ' value="' + esc(slotValue(values, i, 'label')) + '" aria-label="Document ' + i +
+                ' button label" title="Choosing a category fills this label; edit it freely."></td></tr>');
+        }
+        html.push('</tbody></table></div></section><section><h2>Options</h2>' +
+            '<label class="check"><input type="checkbox"' + attrs(FLD.ATTACH_TOO) +
+            ' value="T"' + (values.attachToo ? ' checked' : '') +
+            '>Also attach the files to the email</label></section>' +
+            '<p id="dsn-submit-status" role="status"></p></form>');
+        // Only our own HTML is accessed. No hidden mirrors or N/currentRecord model.
+        //
+        // RULE: NO USER DATA GOES IN THIS SCRIPT BLOCK. Everything interpolated below is a
+        // hard-coded field ID via JSON.stringify. The script reaches user values through
+        // DOM property reads instead - getAttribute("data-email") and options[i].text -
+        // which do no parsing and cannot execute anything.
+        //
+        // This is deliberate, not luck, and it is the reason the escaping review came back
+        // clean. esc() is an HTML escaper, and HTML escaping does NOT make a value safe
+        // inside a <script> element: a category or label containing "</script>" would end
+        // the block early and everything after it would be parsed as markup. Escaped or
+        // not. If you ever need a server value in here, serialise it with JSON.stringify
+        // AND neutralise "</" - or better, put it in a data- attribute and read it, as the
+        // two behaviours below do.
+        html.push('<script>(function(){"use strict";' +
+            'var form=document.getElementById("dsn-html-form");' +
+            'var contact=document.getElementById(' + JSON.stringify(FLD.CONTACT) + ');' +
+            'contact.addEventListener("change",function(){' +
+                'var choice=this.options[this.selectedIndex];' +
+                'var address=choice?choice.getAttribute("data-email"):"";' +
+                'if(address){document.getElementById(' + JSON.stringify(FLD.TO) + ').value=address;}});' +
+            'form.querySelectorAll("select[data-label-target]").forEach(function(select){' +
+                'select.addEventListener("change",function(){if(!this.value){return;}' +
+                'document.getElementById(this.getAttribute("data-label-target")).value=this.options[this.selectedIndex].text;});});' +
+            'var submitting=false;form.addEventListener("submit",function(event){' +
+                'if(submitting){event.preventDefault();return;}' +
+                'var files=Array.from(form.querySelectorAll("input[type=file]"));' +
+                'if(!files.some(function(input){return input.files.length>0;})){' +
+                    'event.preventDefault();document.getElementById("dsn-submit-status").textContent="Please choose at least one drawing.";return;}' +
+                // Exclude empty multipart file parts, preserving non-sequential slots.
+                'files.forEach(function(input){input.disabled=input.files.length===0;});' +
+                'submitting=true;form.querySelector("button[type=submit]").disabled=true;' +
+                'document.getElementById("dsn-submit-status").textContent="Submitting. Please do not refresh or submit again.";});' +
+            'window.addEventListener("pageshow",function(){submitting=false;' +
+                'form.querySelector("button[type=submit]").disabled=false;' +
+                'form.querySelectorAll("input[type=file]").forEach(function(input){input.disabled=false;});' +
+                'document.getElementById("dsn-submit-status").textContent="";});' +
+            '})();</script></main></body></html>');
+        context.response.write(html.join(''));
     }
 
     /**
@@ -234,7 +315,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             }
             html.push('</ul>');
             html.push('<p style="margin:8px 0 0 0;">Please re-attach your drawings before ' +
-                      'submitting again - a browser cannot restore file selections.</p>');
+                    'submitting again - a browser cannot restore file selections.</p>');
             html.push('</div>');
         }
 
@@ -244,12 +325,24 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             html.push('<div style="border:2px solid #E35205; background:#fff8f2; padding:12px; margin-bottom:12px;">');
             html.push('<strong>This email will be sent from you.</strong> ');
             html.push('Neither a sales rep nor a project engineer is set on this ' +
-                      'Opportunity, so the sender has defaulted to your own user record. ');
+                    'Opportunity, so the sender has defaulted to your own user record. ');
             html.push('Check the <em>Send As</em> field before sending.');
             html.push('</div>');
         }
 
         return html.join('');
+    }
+
+    /**
+     * A previously submitted category or label for slot n, so a refused submission does
+     * not make the user retype every label. The file selections themselves cannot be
+     * restored - no browser allows it - which is exactly why the labels should be.
+     */
+    function slotValue(values, position, key) {
+        var slots = values && values.slots;
+        var slot = slots && slots[position];
+        if (!slot) { return ''; }
+        return slot[key] || '';
     }
 
     function buildSenderLabel(candidate) {
@@ -269,42 +362,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         return contact.name + ' (no email)';
     }
 
-    function addVisibleText(form, fieldId, label, value, help) {
-        var field = form.addField({
-            id:    fieldId,
-            type:  serverWidget.FieldType.TEXT,
-            label: label
-        });
-        if (help) { field.setHelpText({ help: help }); }
-        if (value) { field.defaultValue = value; }
-        return field;
-    }
-
-    /**
-     * JSON of contact internal ID -> email address. Contacts with no email are included
-     * with an empty string, so the client script can tell "no email recorded" apart
-     * from "not a contact on this Opportunity" and leave the To field alone either way.
-     */
-    function buildContactEmailMap(contacts) {
-        var map = {};
-        var i;
-        for (i = 0; i < contacts.length; i++) {
-            map[contacts[i].id] = contacts[i].email || '';
-        }
-        return JSON.stringify(map);
-    }
-
-    function addHiddenLongText(form, fieldId, label, value) {
-        var field = form.addField({
-            id:    fieldId,
-            type:  serverWidget.FieldType.LONGTEXT,
-            label: label
-        });
-        if (value) { field.defaultValue = value; }
-        field.updateDisplayType({ displayType: serverWidget.FieldDisplayType.HIDDEN });
-        return field;
-    }
-
     function addHiddenText(form, fieldId, label, value) {
         var field = form.addField({
             id:    fieldId,
@@ -316,7 +373,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         return field;
     }
 
-    // --- Reading the Opportunity ---------------------------------------------
+    // --- Reading the Opportunity ----
 
     /**
      * Everything the form and the send need from the Opportunity, resolved once.
@@ -354,8 +411,8 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             candidates:      candidates,
             defaultSenderKey: defaultKey,
             defaultedToCurrentUser: defaultKey === SENDER_CURRENT_USER &&
-                                    !findCandidate(candidates, SENDER_SALES_REP) &&
-                                    !findCandidate(candidates, SENDER_PROJECT_ENGINEER)
+                    !findCandidate(candidates, SENDER_SALES_REP) &&
+                    !findCandidate(candidates, SENDER_PROJECT_ENGINEER)
         };
     }
 
@@ -458,9 +515,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     /**
      * Default sender:
      *   value proposition in the parameter list -> sales rep
-     *   otherwise                               -> project engineer
+     *   otherwise                    -> project engineer
      *   project engineer blank                  -> sales rep
-     *   both blank                              -> current user
+     *   both blank                    -> current user
      *
      * Expressed as a preference order so that the case the brief does not name - value
      * proposition prefers the sales rep, but no sales rep is set - also has a defined
@@ -554,7 +611,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         return contacts;
     }
 
-    // --- POST: validate, save, send ------------------------------------------
+    // --- POST: validate, save, send ----
 
     function handleSubmit(context) {
         var params = context.request.parameters;
@@ -583,14 +640,17 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             senderKey: (params[FLD.SENDER] || '').trim(),
             to:        (params[FLD.TO] || '').trim(),
             cc:        (params[FLD.CC] || '').trim(),
-            bcc:       (params[FLD.BCC] || '').trim()
+            bcc:       (params[FLD.BCC] || '').trim(),
+            attachToo: params[FLD.ATTACH_TOO] === 'T',
+            slots:     collectSlotValues(params)
         };
 
         // Re-resolved from the record, never taken from the client.
         data = loadOpportunityContext(opportunityId);
         sender = findCandidate(data.candidates, submitted.senderKey);
 
-        uploads = collectUploads(context.request.files);
+        uploads = collectUploads(context.request.files, params);
+        resolveDocumentLabels(uploads);
 
         errors = validateSubmission(sender, submitted, uploads);
         if (errors.length > 0) {
@@ -605,7 +665,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         // or an oversized drawing never leaves a file behind in the File Cabinet.
         savedFiles = saveUploads(uploads, data.tranId);
 
-        attachments = loadSavedFiles(savedFiles);
+        // Attachments only when the user asked for them. Linking alone is the default,
+        // and is what removes the 15 MB ceiling from the common case.
+        attachments = submitted.attachToo ? collectAttachments(savedFiles) : [];
 
         toList  = config.parseEmails(submitted.to);
         ccList  = config.parseEmails(submitted.cc);
@@ -620,7 +682,9 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             senderRole:  sender.roleLabel,
             senderName:  sender.name,
             senderEmail: senderEmailForBody,
-            senderPhone: sender.phone
+            senderPhone: sender.phone,
+            documents:   buildDocumentList(savedFiles),
+            attachFiles: submitted.attachToo
         });
 
         subject = 'Your installation drawings - ' + buildProjectRef(data);
@@ -644,7 +708,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      * Reads the FILE fields off the request. A field the user left empty is simply
      * absent from request.files, so presence is tested rather than assumed.
      */
-    function collectUploads(files) {
+    function collectUploads(files, params) {
         var uploads = [];
         var requestFiles = files || {};
         var i;
@@ -654,17 +718,116 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
             fieldId = FLD.FILE_PREFIX + i;
             fileObj = requestFiles[fieldId];
-            if (fileObj) {
+
+            // A NAME is required, not merely that an object arrived.
+            //
+            // An untouched <input type="file"> can still post a multipart part - one with
+            // an empty filename and no content. Accepting it on truthiness alone turns an
+            // empty row into a phantom upload, which then fails validation for having no
+            // label and blocks the entire send while naming a row the user never filled -
+            // and they lose every file selection retrying, because no browser can restore
+            // a file input.
+            //
+            // The page's submit guard disables empty inputs before posting, so this should
+            // not arise. But that guard is browser JavaScript, and if it does not run the
+            // failure is loud and baffling. With native FILE fields the platform
+            // guaranteed empty slots were simply absent (see the Phase 0 spike); the
+            // hand-written form moved that guarantee into a line of JS, and this puts it
+            // back on the server where it cannot be skipped.
+            //
+            // With this check in place, isOversized treating a zero size as acceptable is
+            // harmless: nothing zero-sized gets this far.
+            if (fileObj && String(fileObj.name || '').trim()) {
                 uploads.push({
-                    fieldId:  fieldId,
-                    position: i,
-                    fileObj:  fileObj,
-                    name:     fileObj.name,
-                    size:     fileObj.size
+                    fieldId:    fieldId,
+                    position:   i,
+                    fileObj:    fileObj,
+                    name:       fileObj.name,
+                    size:       fileObj.size,
+                    categoryId: (params[FLD.CATEGORY_PREFIX + i] || '').trim(),
+                    labelRaw:   (params[FLD.LABEL_PREFIX + i] || '').trim(),
+                    label:      ''
                 });
             }
         }
         return uploads;
+    }
+
+    /**
+     * The submitted category and label for every slot, kept so a refused submission can
+     * be re-rendered without the user retyping. Indexed by slot position.
+     */
+    function collectSlotValues(params) {
+        var slots = {};
+        var i;
+        for (i = 1; i <= config.ATTACHMENT_FIELD_COUNT; i++) {
+            slots[i] = {
+                category: (params[FLD.CATEGORY_PREFIX + i] || '').trim(),
+                label:    (params[FLD.LABEL_PREFIX + i] || '').trim()
+            };
+        }
+        return slots;
+    }
+
+    /**
+     * Settles the button label for each uploaded document.
+     *
+     * The user's text wins. When they have cleared it, the category name is used, so a
+     * document can never produce an unlabelled button - a yellow button with nothing on
+     * it tells the customer nothing and looks broken. When neither is available the slot
+     * is left without a label and validateSubmission refuses the send, naming it.
+     */
+    function resolveDocumentLabels(uploads) {
+        var i;
+        var upload;
+
+        for (i = 0; i < uploads.length; i++) {
+            upload = uploads[i];
+
+            if (upload.labelRaw) {
+                upload.label = upload.labelRaw;
+                continue;
+            }
+
+            upload.label = lookupCategoryName(upload.categoryId);
+
+            if (upload.label) {
+                log.audit('dsn_sl_send_design.resolveDocumentLabels',
+                    'Document ' + upload.position + ' ("' + upload.name + '") had no ' +
+                    'label; falling back to the category name "' + upload.label + '".');
+            }
+        }
+    }
+
+    /**
+     * The display name of a link category.
+     *
+     * Looked up by the list's SCRIPT ID, never a numeric internal ID, so the client can
+     * add categories to customlist_dsn_link_category without a deployment.
+     *
+     * A failed lookup returns '' rather than throwing. The consequence is not silence:
+     * an upload with no label and no resolvable category is refused by name in
+     * validateSubmission, so the send stops either way - but it stops with a message the
+     * user can act on rather than a stack trace.
+     */
+    function lookupCategoryName(categoryId) {
+        var fields;
+
+        if (!categoryId) { return ''; }
+
+        try {
+            fields = search.lookupFields({
+                type:    config.LINK_CATEGORY_LIST,
+                id:      categoryId,
+                columns: ['name']
+            });
+            return (fields && fields.name) ? String(fields.name).trim() : '';
+        } catch (e) {
+            log.error('dsn_sl_send_design.lookupCategoryName',
+                'Could not read the name of category ' + categoryId + ' from ' +
+                config.LINK_CATEGORY_LIST + ': ' + e.message);
+            return '';
+        }
     }
 
     /**
@@ -673,6 +836,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      */
     function validateSubmission(sender, submitted, uploads) {
         var errors = [];
+        var totalBytes = 0;
         var i;
 
         if (!sender) {
@@ -697,21 +861,59 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             errors.push('Please attach at least one drawing.');
         }
 
-        // Size is read from the unsaved request file, before any save is attempted.
-        // file.save() throws SSS_FILE_CONTENT_SIZE_EXCEEDED above 10 MB, which tells the
-        // user nothing they can act on; naming the file and the limit tells them to
-        // compress or split it.
+        // Every document needs a button label. Unchanged by Phase 2's link/attach split:
+        // an unlabelled button is useless whether or not the file is also attached.
         for (i = 0; i < uploads.length; i++) {
+            if (!uploads[i].label) {
+                errors.push('Document ' + uploads[i].position + ' ("' + uploads[i].name +
+                    '") has no button label and no category to fall back on. Please ' +
+                    'choose a category or type a label for it.');
+            }
+        }
+
+        // ALWAYS ENFORCED. Size is read from the unsaved request file, before any save is
+        // attempted. file.save() throws SSS_FILE_CONTENT_SIZE_EXCEEDED above 10 MB, which
+        // tells the user nothing they can act on; naming the file and the limit tells
+        // them to compress or split it. Linking does not lift this: the file still has to
+        // be saved to the File Cabinet before it can be linked to.
+        for (i = 0; i < uploads.length; i++) {
+            totalBytes = totalBytes + usableSize(uploads[i]);
+
             if (isOversized(uploads[i])) {
                 errors.push('"' + uploads[i].name + '" is ' +
                     describeSize(uploads[i].size) + ', which is over the ' +
                     describeSize(config.MAX_ATTACHMENT_BYTES) + ' limit for a single ' +
-                    'attachment. Please compress it or split it, then try again. ' +
-                    'Nothing has been saved or sent.');
+                    'file. This limit applies however the document is sent, because the ' +
+                    'file has to be saved before it can be linked to. Please compress it ' +
+                    'or split it, then try again. Nothing has been saved or sent.');
             }
         }
 
+        // ONLY WHEN ATTACHING. A link-only send puts nothing in the message, so the
+        // 15 MB message ceiling does not apply to it - which is the whole point of
+        // Phase 2. The message says why the limit is in play, so the user can see that
+        // clearing the checkbox is the fix.
+        if (submitted.attachToo && totalBytes > config.MAX_MESSAGE_BYTES) {
+            errors.push('These documents total ' + describeSize(totalBytes) +
+                ', which is over the ' + describeSize(config.MAX_MESSAGE_BYTES) +
+                ' limit for one email. That limit applies because you ticked ' +
+                '"Also attach the files to the email". Untick it to send them as ' +
+                'links only, which has no total size limit, or send them across ' +
+                'several emails. Nothing has been saved or sent.');
+        }
+
         return errors;
+    }
+
+    /**
+     * A size that can be added up. Unreadable sizes count as zero rather than failing
+     * the total: the per-file check already treats an unreadable size as acceptable, and
+     * the two must agree or a file could pass one check and fail the other for the same
+     * unknown value.
+     */
+    function usableSize(upload) {
+        var size = Number(upload.size);
+        return (isFinite(size) && size > 0) ? size : 0;
     }
 
     /**
@@ -741,48 +943,207 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
     /**
      * Saves each upload into the configured folder.
      *
-     * FILE NAME COLLISIONS: the File Cabinet requires unique names within a folder, and
-     * two Opportunities will both send "Drawing1.pdf". Every saved name is therefore
-     * prefixed with the Opportunity's tranid and a timestamp:
+     * FILE NAME COLLISIONS: two Opportunities will both send "Drawing1.pdf". Every saved
+     * name is therefore prefixed with the Opportunity's tranid and a timestamp:
      *
-     *     <tranid>_<YYYYMMDD-HHMMSS>_<n>_<original name>
+     *     <tranid>_<YYYYMMDD-HHMMSSmmm>_<n>_<original name>
      *
-     * The tranid scopes it to the Opportunity, the timestamp separates one send from
-     * the next (including a resend of the same drawing after a redraw), and the index
+     * The tranid scopes it to the Opportunity, the timestamp separates one send from the
+     * next (including a resend of the same drawing after a redraw), and the index
      * separates files within a single send that happen to share a name.
+     *
+     * WHY THE TIMESTAMP CARRIES MILLISECONDS. Saving a file whose name already exists in
+     * the folder OVERWRITES the existing file rather than failing. With second
+     * granularity, two sends from the same Opportunity inside one second - a
+     * double-submit, or two people working the same job - would silently replace the
+     * first send's file, and every link already in the first customer's inbox would
+     * start serving the second customer's drawing. Milliseconds close that window.
+     *
+     * This is now load-bearing for Phase 2 in a way it was not for Phase 1: a link is a
+     * promise that stays live in someone's mailbox, so what it points at must never
+     * change underneath them.
      */
     function saveUploads(uploads, tranId) {
         var saved = [];
         var stamp = buildTimestamp(new Date());
+        var folderId = config.getAttachmentFolder();
         var i;
         var upload;
         var fileObj;
         var savedName;
         var fileId;
+        var published;
 
         for (i = 0; i < uploads.length; i++) {
             upload = uploads[i];
             fileObj = upload.fileObj;
 
-            savedName = buildSavedFileName(tranId, stamp, upload.position, upload.name);
+            savedName = ensureNameIsFree(
+                buildSavedFileName(tranId, stamp, upload.position, upload.name),
+                folderId);
 
             fileObj.name = savedName;
-            fileObj.folder = config.getAttachmentFolder();
+            fileObj.folder = folderId;
+
+            // Publish. The documentation reachable here says isOnline may be set on the
+            // file object before save(); publishAndLoad below re-checks after the save
+            // and corrects it if that turns out not to hold, so this is right either way.
+            fileObj.isOnline = true;
 
             fileId = fileObj.save();
 
+            published = publishAndLoad(fileId, savedName);
+
+            // Logged at audit WITH the URL, so a customer reporting a dead link can be
+            // traced to the exact file that was sent without guessing which send it came
+            // from or reconstructing the URL by hand.
             log.audit('dsn_sl_send_design.saveUploads',
-                'Saved "' + upload.name + '" as "' + savedName + '" (file ' + fileId + ').');
+                'Saved "' + upload.name + '" as "' + savedName + '" (file ' + fileId +
+                ') | label: "' + upload.label + '" | url: ' +
+                (published.url || '(NO URL RESOLVED)'));
 
             saved.push({
                 id:           fileId,
                 savedName:    savedName,
                 originalName: upload.name,
-                size:         upload.size
+                size:         upload.size,
+                label:        upload.label,
+                url:          published.url,
+                fileObj:      published.fileObj
             });
         }
 
         return saved;
+    }
+
+    /**
+     * Loads a just-saved file back and returns it with its public URL.
+     *
+     * Reloading is not optional: File.url depends on the file's internal ID and its
+     * generated hash, neither of which exists until the save has happened.
+     *
+     * The isOnline re-check exists because the documentation could not settle whether
+     * setting isOnline before save() is sufficient (see docs/phase-2-links.md). If the
+     * reloaded file reports isOnline false, it is set and saved again. Under the
+     * documented reading this branch never runs; if the documented reading is wrong, the
+     * link still works. Either way the outcome is logged, so which one is true becomes
+     * visible in the execution log rather than staying a guess.
+     */
+    function publishAndLoad(fileId, savedName) {
+        var fileObj = file.load({ id: fileId });
+
+        if (fileObj.isOnline !== true) {
+            log.audit('dsn_sl_send_design.publishAndLoad',
+                '"' + savedName + '" was not online after save; setting isOnline on the ' +
+                'saved file and re-saving. Setting isOnline before save() is evidently ' +
+                'not sufficient in this account.');
+            try {
+                fileObj.isOnline = true;
+                fileObj.save();
+                fileObj = file.load({ id: fileId });
+            } catch (e) {
+                log.error('dsn_sl_send_design.publishAndLoad',
+                    'Could not publish "' + savedName + '" (file ' + fileId + '): ' +
+                    e.message + ' - its link will require a NetSuite login.');
+            }
+        }
+
+        return {
+            fileObj: fileObj,
+            url:     config.buildPublicFileUrl(fileObj.url)
+        };
+    }
+
+    /**
+     * The documents passed to the template, in the order their slots appear on the form,
+     * which is the order the buttons appear in the email.
+     */
+    function buildDocumentList(savedFiles) {
+        var documents = [];
+        var i;
+        for (i = 0; i < savedFiles.length; i++) {
+            documents.push({
+                label: savedFiles[i].label,
+                url:   savedFiles[i].url
+            });
+        }
+        return documents;
+    }
+
+    function collectAttachments(savedFiles) {
+        var attachments = [];
+        var i;
+        for (i = 0; i < savedFiles.length; i++) {
+            attachments.push(savedFiles[i].fileObj);
+        }
+        return attachments;
+    }
+
+    /**
+     * Returns a name that no file in the folder currently holds, appending _2, _3 and so
+     * on until one is free.
+     *
+     * This exists because **saving over an existing name silently replaces that file**.
+     * The timestamp makes a clash vanishingly unlikely, but "unlikely" is the wrong
+     * standard here: a link lives in a customer's mailbox indefinitely, and a clash would
+     * not fail loudly - it would quietly re-point an already-delivered link at somebody
+     * else's drawing. A check that costs one search per file is worth that.
+     *
+     * A failed search returns the name unchanged rather than blocking the send. That is
+     * the lesser risk: the clash it guards against needs two sends inside the same
+     * millisecond, whereas refusing on a search error would block an ordinary send.
+     */
+    function ensureNameIsFree(preferredName, folderId) {
+        var MAX_ATTEMPTS = 50;
+        var candidate = preferredName;
+        var dotAt;
+        var base;
+        var extension;
+        var attempt = 1;
+
+        dotAt = preferredName.lastIndexOf('.');
+        base = dotAt > 0 ? preferredName.substring(0, dotAt) : preferredName;
+        extension = dotAt > 0 ? preferredName.substring(dotAt) : '';
+
+        try {
+            while (attempt <= MAX_ATTEMPTS && nameExistsInFolder(candidate, folderId)) {
+                attempt = attempt + 1;
+                candidate = base + '_' + attempt + extension;
+            }
+        } catch (e) {
+            log.error('dsn_sl_send_design.ensureNameIsFree',
+                'Could not check whether "' + preferredName + '" is already used in ' +
+                'folder ' + folderId + ': ' + e.message + ' - saving under the preferred ' +
+                'name.');
+            return preferredName;
+        }
+
+        if (candidate !== preferredName) {
+            log.audit('dsn_sl_send_design.ensureNameIsFree',
+                '"' + preferredName + '" was already in folder ' + folderId +
+                '; saving as "' + candidate + '" instead so the existing file, and any ' +
+                'link already sent to a customer, are left untouched.');
+        }
+
+        return candidate;
+    }
+
+    function nameExistsInFolder(name, folderId) {
+        var found = false;
+
+        search.create({
+            type: 'file',
+            filters: [
+                ['name', 'is', name], 'AND',
+                ['folder', 'anyof', folderId]
+            ],
+            columns: ['internalid']
+        }).run().each(function () {
+            found = true;
+            return false;
+        });
+
+        return found;
     }
 
     /**
@@ -834,20 +1195,18 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             pad2(date.getDate()) + '-' +
             pad2(date.getHours()) +
             pad2(date.getMinutes()) +
-            pad2(date.getSeconds());
+            pad2(date.getSeconds()) +
+            pad3(date.getMilliseconds());
     }
 
     function pad2(value) {
         return value < 10 ? '0' + value : String(value);
     }
 
-    function loadSavedFiles(savedFiles) {
-        var attachments = [];
-        var i;
-        for (i = 0; i < savedFiles.length; i++) {
-            attachments.push(file.load({ id: savedFiles[i].id }));
-        }
-        return attachments;
+    function pad3(value) {
+        if (value < 10) { return '00' + value; }
+        if (value < 100) { return '0' + value; }
+        return String(value);
     }
 
     /**
@@ -891,7 +1250,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             ' | ' + options.attachments.length + ' attachment(s)');
     }
 
-    // --- Result pages --------------------------------------------------------
+    // --- Result pages ----
 
     function showSuccessPage(context, data, sender, submitted, savedFiles, senderEmailForBody) {
         var form = serverWidget.createForm({ title: 'Send Design - sent' });
@@ -911,17 +1270,27 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
             (sender.email ? ' (' + config.escapeHtml(sender.email) + ')' : '')));
         html.push(row('Printed in the email', config.escapeHtml(senderEmailForBody) +
             (sender.phone ? ' and ' + config.escapeHtml(sender.phone)
-                          : ' (no phone shown - the sender has no office phone recorded)')));
+                    : ' (no phone shown - the sender has no office phone recorded)')));
         html.push(row('To', config.escapeHtml(submitted.to)));
         html.push(row('CC', config.escapeHtml(submitted.cc) || '(none)'));
         html.push(row('BCC', config.escapeHtml(submitted.bcc) || '(none)'));
         html.push('</table>');
 
-        html.push('<h3>Attachments saved and sent</h3>');
+        html.push('<h3>Documents sent</h3>');
+        html.push('<p style="margin:0 0 8px 0;">' +
+            (submitted.attachToo
+                ? 'Sent as links <strong>and</strong> as attachments.'
+                : 'Sent as links only. Nothing was attached to the message.') +
+            '</p>');
+        html.push('<p style="margin:0 0 8px 0;">Please click a link below to check it ' +
+            'opens before the customer does.</p>');
         html.push('<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;">');
-        html.push('<tr style="background:#eee;"><th>Original name</th><th>Saved as</th><th>Size</th></tr>');
+        html.push('<tr style="background:#eee;"><th>Button label</th><th>Link</th>' +
+            '<th>Original name</th><th>Saved as</th><th>Size</th></tr>');
         for (i = 0; i < savedFiles.length; i++) {
-            html.push('<tr><td>' + config.escapeHtml(savedFiles[i].originalName) + '</td>' +
+            html.push('<tr><td>' + config.escapeHtml(savedFiles[i].label) + '</td>' +
+                '<td>' + buildLinkCell(savedFiles[i].url) + '</td>' +
+                '<td>' + config.escapeHtml(savedFiles[i].originalName) + '</td>' +
                 '<td>' + config.escapeHtml(savedFiles[i].savedName) + '</td>' +
                 '<td>' + config.escapeHtml(describeSize(savedFiles[i].size)) + '</td></tr>');
         }
@@ -943,6 +1312,22 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         form.clientScriptModulePath = './dsn_cs_send_design.js';
 
         context.response.writePage(form);
+    }
+
+    /**
+     * The link cell on the success page: clickable, and showing the URL in full so it can
+     * be copied or eyeballed. A document with no resolvable URL says so loudly - the
+     * email has already gone, so the sender needs to know a button in it is dead.
+     */
+    function buildLinkCell(publicUrl) {
+        var safe;
+        if (!publicUrl) {
+            return '<strong style="color:#c00;">No link could be built for this ' +
+                   'document. Its button in the email will not work - please check the ' +
+                   'execution log.</strong>';
+        }
+        safe = config.escapeHtml(publicUrl);
+        return '<a href="' + safe + '" target="_blank">' + safe + '</a>';
     }
 
     function row(label, value) {
