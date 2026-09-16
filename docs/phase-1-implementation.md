@@ -1,8 +1,7 @@
 # Phase 1 — Send Design implementation
 
-Status: **code complete, untested in NetSuite.** Nothing is deployed and nothing is
-merged. Verification so far is `node --check` plus a stubbed harness (below); the real
-tests are the eighteen scenarios at the end, which need Sandbox.
+Status: **code complete and tested in Sandbox**, where the client reports it behaves as
+expected. Not merged, and not deployed to Production.
 
 Decisions this implements are recorded in `docs/phase-0-recon.md`. Where the code and
 that document disagree, the document is the intent and the code is the defect.
@@ -171,7 +170,7 @@ Deliberate, because it determines what is left behind when something fails:
 
 So an invalid address or an oversized drawing **never leaves a file behind in the File
 Cabinet**. Size is read from the unsaved `request.files` object, which the spike confirmed
-is populated.
+is populated (`docs/phase-0-recon.md`, Part 2 Q3).
 
 **One consequence worth stating:** when validation fails the form re-renders with the
 sender and the To/CC/BCC values restored, but **the file selections cannot be restored** —
@@ -219,14 +218,19 @@ eighteen scenarios below, including that nothing is saved when a send is refused
 PE's own address never appears in the body, and that the footer reads correctly with the
 phone clause dropped.
 
-**This is not a substitute for Sandbox.** The harness proves the logic; it cannot prove
+**The harness was never a substitute for Sandbox.** It proves the logic; it cannot prove
 anything about how NetSuite actually behaves — `form.addButton`, `FILE` field parsing,
-`file.save()`, `email.send` and `relatedRecords` are all stubs. One bug it did find and
+`file.save()`, `email.send` and `relatedRecords` were all stubs. One bug it did find and
 which is fixed: `..` surviving filename sanitisation.
+
+**Sandbox has since confirmed the feature behaves as expected.** That confirmation is the
+client's, covering the feature as a whole rather than a signed-off row-by-row result, so
+the table below is kept as the scenario list it always was — useful again on the next
+change to these scripts, and the place to record per-row results if they are ever needed.
 
 ---
 
-## Tests to run in Sandbox
+## Test scenarios
 
 | # | Scenario | Expected |
 |---|---|---|
@@ -274,5 +278,6 @@ Worth adding to the list when Sandbox time allows:
    The code currently keeps every saved drawing, including after a failed `email.send`.
    Since validation happens before saving, the only way to orphan files is a genuine send
    failure, which the user sees.
-4. **`spike/` is still present**, as instructed. The client removes the deployed script;
-   the folder goes when this PR is merged.
+4. **The spike is gone.** Its findings are recorded in `docs/phase-0-recon.md`, Part 2
+   Q3 — that is now the only record of them, since the documentation is silent on every
+   one. The client has removed the deployed script from Sandbox.

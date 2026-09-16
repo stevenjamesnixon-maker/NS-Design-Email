@@ -1,8 +1,8 @@
 # NS-Design-Email — Phase 0: reconnaissance and attachment spike
 
 Status: **complete.** Part 1 answered from the committed reference source; Part 2
-answered from documentation; the Phase 0 decisions recorded. One question remains open,
-and `spike/` exists to answer it.
+answered from documentation, except Q3, which was answered by experiment in Sandbox; the
+Phase 0 decisions recorded. Nothing here is outstanding.
 Date: 2026-09-16
 Nothing has been built. No implementation code exists in this repository.
 
@@ -362,11 +362,13 @@ project's code.
 
 ## Part 2 — The attachment spike
 
-Answered from NetSuite documentation. Two standing caveats:
+Answered from NetSuite documentation, except for Q3, which documentation could not
+settle and which was answered by experiment in Sandbox. Two standing caveats:
 
-- **No account access.** Nothing here has been verified against a live NetSuite
-  instance. Anything marked *open question* must be tested in Sandbox before the
-  design depends on it.
+- **Q1 and Q2 were not verified against a live NetSuite instance.** They were written
+  without account access. **Q3 is different**: every finding in it was observed in
+  Sandbox by a throwaway Suitelet, and is recorded there precisely because there is no
+  documentation to look it up in.
 - **Documentation access was partial.** `docs.oracle.com` is blocked by this
   environment's network egress proxy, so the Oracle Help Center pages could not be
   opened directly. The findings below are drawn from search-engine extracts of those
@@ -467,55 +469,58 @@ that attaches perfectly well by hand today can fail in the Suitelet with
 most likely way for Phase 1 to look finished and then fail in production, which is why
 real attachment sizes are still needed from the client.
 
-### Q3 — How are multiple files accepted?
+### Q3 — How are multiple files accepted? **ANSWERED IN SANDBOX**
 
-**Confirmed: a NetSuite `FILE` field holds exactly one file.** Native file fields
-permit single-file uploads only, and `FILE` fields are not supported on sublists at
-all — so a dynamic "add another row" list of uploads is not available through the
-standard form API.
+**A NetSuite `FILE` field holds exactly one file.** Native file fields permit
+single-file uploads only, and `FILE` fields are not supported on sublists at all — so a
+dynamic "add another row" list of uploads is not available through the standard form
+API. Several drawings therefore means several fields.
 
-There is a documented-adjacent complication worth flagging: at least one secondary
-source states that **NetSuite will not parse multipart form data containing multiple
-files in a single Suitelet request**. If that is true of NetSuite-rendered Suitelet
-forms, then even several `FILE` fields on one form would yield only one file per POST,
-and the whole approach changes. However, the same source elsewhere recommends
-multiple `FILE` fields "for small, predictable scenarios", which contradicts that
-reading — the limitation is most likely about hand-rolled multipart POSTs from
-external clients, not about a form NetSuite built and posted to itself.
+Whether that actually works could not be settled from documentation. The Help Center is
+silent on it, and the one secondary source found contradicted itself: it stated that
+NetSuite **will not** parse multipart form data containing multiple files in a single
+Suitelet request, while elsewhere recommending multiple `FILE` fields "for small,
+predictable scenarios". Since the answer decided whether the feature was buildable in
+its intended form at all, it was settled by experiment rather than by reading.
 
-**This contradiction could not be resolved from documentation, and it is the single
-most important thing to test.** A throwaway Sandbox Suitelet with three `FILE` fields
-that logs how many arrive in `request.files` resolves it in under an hour, and it
-should be done before Phase 1 is briefed, because the answer determines whether the
-feature is buildable in its intended form.
+#### What the spike observed
 
-Assuming multiple `FILE` fields do work, on a sensible fixed number:
+A throwaway Suitelet with three `FILE` fields was deployed to Sandbox and submitted
+twice. **Every finding below was observed, not inferred.** The documentation is silent
+or contradictory on all of them, so this section is the record — there is nowhere else
+to look them up.
 
-**Four fields is the recommendation.** The reasoning: at 10 MB per attachment against
-a 15 MB total, no more than three or four files of realistic drawing size can be sent
-at once in any case, so more fields would be fields that can never all be used. Four
-covers the common cases without making the form look like a filing cabinet. Fields
-beyond the first should be optional, and empty ones skipped silently.
+| Observation | Consequence for the design |
+|---|---|
+| **Three fields filled → all three arrived** in `request.files` | Multiple `FILE` fields work. The base64 fallback is not needed and was never built. |
+| **Fields 1 and 3 filled, field 2 empty → both arrived.** A gap does **not** truncate the set | Attachment fields can be filled in any order. The Suitelet reads all five positions rather than stopping at the first empty one, and users need not fill them top-down. |
+| **An empty field is ABSENT** — no key at all, not a present-but-empty entry | Presence is tested by looking the key up, never by inspecting a file object for emptiness. `collectUploads` in `dsn_sl_send_design.js` depends on this. |
+| **`size` is populated on an unsaved request file** | The per-file 10 MB check can run **before** `file.save()`, which is what lets an oversized drawing be refused by name instead of surfacing as `SSS_FILE_CONTENT_SIZE_EXCEEDED`. Had this come back empty, the whole refuse-before-saving design would have needed rethinking. |
+| **`fileType` is populated**, and a `.docx` reports as **`MISCBINARY`** | `fileType` is not a reliable way to tell one document format from another. Nothing in Phase 1 branches on it, and nothing should start to without checking what the real files actually report. |
 
-Better mechanisms, and why none is recommended for Phase 1:
+The secondary source's "will not parse multiple files" claim is therefore wrong as
+applied to a NetSuite-rendered Suitelet form. It most likely describes hand-rolled
+multipart POSTs from external clients, which is a different thing.
 
-- **Custom HTML with a `multiple` file input and drag-and-drop**, built via
-  `form.addField({type: INLINEHTML})` with a client script doing the upload. Gives
-  the nicest user experience and no fixed limit. Costs: hand-rolled markup and upload
-  handling, browser compatibility surface, and it abandons the Send Quote form
-  patterns that Part 1 exists to harvest. Not worth it for a first release.
-- **Base64 into a LONGTEXT field**, encoding client-side and decoding with
-  `file.create()`. Sidesteps multipart parsing entirely and is the documented
-  workaround where multipart is the problem. Costs: base64 inflates payload by ~33%
-  against already-tight limits, and it needs real client-side code. Keep this in
-  reserve — it is the fallback if the Sandbox test shows multiple `FILE` fields do
-  not work.
-- ~~Pick from files already attached to the Opportunity.~~ **Ruled out.** The Phase 0
-  brief raised this as a possible way round the upload problem entirely. The client has
-  since confirmed the drawings are **not** in the File Cabinet — users attach them from
-  a desktop or network drive at send time — so there is nothing to pick from, and the
-  upload path is unavoidable. This is why the multiple-`FILE`-field question above still
-  has to be answered rather than designed around.
+#### On the number of fields
+
+Phase 0 recommended four. **Phase 1 renders five**, which is the number to keep. At
+10 MB per attachment against a 15 MB per-message ceiling, no more than three or four
+drawings of realistic size will fit in one email anyway — but the team splits large sets
+across several emails, so the fifth field costs nothing and spares a user one extra send
+when the files happen to be small. Empty fields are skipped silently.
+
+#### The mechanism that was not needed
+
+**Base64 into a LONGTEXT field**, encoding client-side and decoding with `file.create()`,
+was the fallback if multiple `FILE` fields had failed. It sidesteps multipart parsing
+entirely, at the cost of a ~33% payload increase against already-tight limits and real
+client-side code. It was not needed and is recorded only so that a future reader knows
+the option exists and why it was not taken.
+
+**Picking from files already attached to the Opportunity** was ruled out earlier: the
+drawings are not in the File Cabinet — users attach them from a desktop or network drive
+at send time — so there is nothing to pick from.
 
 ---
 
@@ -697,32 +702,27 @@ template against fields that still exist, once the CAD Worklist retirement has l
 
 The Decisions section above settles most of what was open. What remains:
 
-**Blocking Phase 1**
+**Nothing is blocking.** The multipart spike has been run, Phase 1 is built, and it has
+been tested in Sandbox.
 
-1. **Run the multipart spike.** `spike/` contains a throwaway Suitelet for Sandbox that
-   answers one question: do three `FILE` fields in one POST all arrive in
-   `request.files`? If they do not, Phase 1 falls back to base64 (Q3) and is a materially
-   bigger job. Deployment steps are in `spike/README.md`.
+**Still to settle**
 
-**Needed as Phase 1 inputs, not blocking the design**
-
-2. **Template 3334's HTML.** The decision is to lift it into the script with merge-tag
-   placeholders; the markup itself is not yet in this repository.
-3. **Script parameter values** — the File Cabinet folder for uploaded drawings, the
+1. **Script parameter values** — the File Cabinet folder for uploaded drawings, the
    acceptable `entitystatus` values, and the value-proposition IDs that default to the
    sales rep. All arrive as parameters, so these are configuration to be supplied at
    deployment rather than anything committed.
-4. **Retention** — are saved drawings kept after a successful send, or deleted?
-5. **Orphan handling** — if the save succeeds and the send then fails, are the saved
+2. **Retention** — are saved drawings kept after a successful send, or deleted?
+3. **Orphan handling** — if the save succeeds and the send then fails, are the saved
    files removed or left?
-6. **What happens when both the project engineer and the sales rep are blank?** The
-   resolution rule falls through to the sales rep when `custbody_pe` is empty, but does
-   not say what to do when neither is set. See the note below.
-7. Does this repository represent **Sandbox or Production**? Outstanding since Phase 0,
+4. Does this repository represent **Sandbox or Production**? Outstanding since Phase 0,
    and it needs settling before any environment-specific value is committed.
 
 **Resolved**
 
+- The multipart question — all of Q3 above, answered in Sandbox.
+- **Template 3334's HTML** arrived and is committed under `reference/`.
+- **Both sender roles blank** now has a defined answer: the sender falls through to the
+  current user, and the form says so explicitly.
 - Button visibility, sender resolution and override, contact-detail source and
   presentation, email field pattern, contact dropdown keying, File Cabinet saving,
   attachment-size handling, and the email template approach — all in Decisions above.
