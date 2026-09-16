@@ -48,7 +48,7 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
     'use strict';
 
-    var SCRIPT_VERSION = '1.5.0';
+    var SCRIPT_VERSION = '1.5.1';
 
     var FLD = {
         OPPORTUNITY_ID: 'custpage_dsn_opportunity_id',
@@ -167,10 +167,6 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
 
         addHiddenText(form, FLD.OPPORTUNITY_ID, 'Opportunity ID', opportunityId);
 
-        // Must happen before the sections are added: it changes how everything after it
-        // is laid out.
-        disableFieldBalancing(form);
-
         addSectionHeading(form, 'email', 'Email',
             'Who the email comes from, and who it goes to.');
 
@@ -209,6 +205,10 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
         // Row 1 of the Email section.
         setRowLayout(senderField, 'start');
         setRowLayout(contactField, 'end');
+
+        // Send As is the first field in the column flow, so this is where the balancing
+        // switch has to go. See disableFieldBalancing.
+        disableFieldBalancing(senderField);
 
         // Contact id -> email, for the client script to read when a contact is picked.
         // A hidden LONGTEXT, not a hidden mirror of a visible input: the client script
@@ -434,31 +434,23 @@ function (serverWidget, record, search, runtime, email, file, url, log, config, 
      *
      * FieldBreakType.STARTCOL is documented to move its own field into a new column AND to
      * "disable automatic field balancing if set on any field". It is that side effect that
-     * is wanted here, not the column break - so it is applied to the HIDDEN Opportunity ID
-     * field, where starting a new column is invisible and harmless.
+     * is wanted, not the column break.
      *
-     * The Phase 2c brief suggested STARTCOL was the thing to avoid. That is right about
-     * its primary effect and, I think, wrong about its side effect: switching the balancer
-     * off is the one documented lever that addresses the actual cause rather than its
-     * symptoms. If Sandbox shows it misbehaving, the fallback is to move it to the first
-     * visible field, or to drop it and accept the balancer.
+     * IT GOES ON THE FIRST VISIBLE FIELD IN THE COLUMN FLOW - Send As.
      *
-     * UNVERIFIED: whether a HIDDEN field's break type is honoured at all. If the form
-     * still balances, that is the first thing to test.
+     * Phase 2c put it on the HIDDEN Opportunity ID field, on the reasoning that an
+     * invisible field was the safest place for a column break. Sandbox showed the three
+     * columns still there, so a hidden field's break type is evidently not honoured, or
+     * not honoured for this purpose. Send As is the first field the flow actually reaches,
+     * so starting a column there is a no-op visually - there is nothing before it to be
+     * separated from - while the side effect still applies to the whole form.
+     *
+     * The section headings are not candidates for this: they sit OUTSIDE the column grid,
+     * so a column break on one of them has nothing to act on.
      */
-    function disableFieldBalancing(form) {
-        var field;
-
-        try {
-            field = form.getField({ id: FLD.OPPORTUNITY_ID });
-        } catch (e) {
-            log.debug('dsn_sl_send_design.disableFieldBalancing',
-                'Could not find the field to carry the balancing switch: ' + e.message);
-            return;
-        }
-
+    function disableFieldBalancing(field) {
         setBreakType(field, serverWidget.FieldBreakType.STARTCOL,
-            'the automatic field balancing switch');
+            'the automatic field balancing switch on the first visible field');
     }
 
     /**

@@ -737,3 +737,91 @@ guaranteed pixel alignment are out of reach.
 **261 assertions across eight suites, all passing.** Assertions in two earlier suites were
 updated where this brief deliberately superseded them — the removed "More documents"
 section, the regrouped Email rows, and the heading layout type.
+
+
+---
+
+## Phase 2d — the last layout attempt, and the record of what was tried
+
+`dsn_sl_send_design.js` **1.5.0 → 1.5.1**. `node --check` passes on all six files.
+
+### One of the two requested changes was already in place
+
+The brief asked for two one-liners. **Only one of them was outstanding.**
+
+The headings were **already** `FieldLayoutType.OUTSIDE` with `FieldBreakType.STARTROW` —
+changed from `OUTSIDEABOVE` in Phase 2c (1.5.0), before the page that was observed. The
+brief describes the code as still holding `OUTSIDEABOVE`, which it has not since 1.5.0.
+
+That matters, because it changes what the observation means. If the rendered page came from
+1.5.0 — and it must have, since it also reports the `STARTCOL`-on-a-hidden-field behaviour
+that only exists from 1.5.0 — then **the headings collecting at the top of the form is what
+`OUTSIDE` does, not what `OUTSIDEABOVE` does.** The brief anticipated exactly this: *"If
+OUTSIDE also floats them out of position, say so — that would mean serverWidget cannot place
+a full-width heading inline, which is a finding worth having."*
+
+So: **that is the finding.** `OUTSIDE` and `OUTSIDEABOVE` both lift a heading out of the
+inline flow. `serverWidget` appears to offer no way to place a full-width field *between*
+two groups of fields — "outside the column grid" and "in the flow at this point" look to be
+mutually exclusive.
+
+I have **left the headings on `OUTSIDE`**, because that is what the brief asked for and
+because changing them again would be the third approach the brief rules out. The one
+remaining one-liner, if the headings still float after this, is noted at the end.
+
+### What did change
+
+`STARTCOL` moved from the hidden Opportunity ID field to **Send As**, the first field the
+column flow actually reaches. A hidden field's break type was evidently not honoured. Send
+As has nothing before it in the flow, so starting a column there is a visual no-op while the
+documented side effect — automatic field balancing off — still applies form-wide.
+
+Section headings were not candidates: they sit `OUTSIDE` the column grid, so a column break
+on one has nothing to act on.
+
+### The record — what each attempt actually produced
+
+Kept so nobody repeats any of it.
+
+| Attempt | Version | What was tried | What it produced |
+|---|---|---|---|
+| 1 | 1.2.0 | `OUTSIDEABOVE` on headings, no break type | Sections still shared columns. A layout type says where a field sits, not that a row begins |
+| 2 | 1.4.0 | `OUTSIDEABOVE` + row layout types on every field | No change to the column flow. Headings still placed by the balancer |
+| 3 | 1.5.0 | `OUTSIDE` + `STARTROW` break on headings; `STARTCOL` on a **hidden** field | Headings render full width and stacked — but **all three collect at the top of the form**, detached from their sections. Fields still flow in three columns: balancing was **not** disabled from a hidden field |
+| 4 | 1.5.1 | `STARTCOL` moved to **Send As**, the first visible field | *To be observed* |
+
+Established along the way, and not to be re-derived:
+
+- A `FILE` field cannot go in a tab, subtab, sublist or field group, and appears only on the
+  main tab. There is therefore no native table and no native collapsing.
+- `FieldBreakType.STARTROW` works only on fields whose layout type is `OUTSIDE`,
+  `OUTSIDEABOVE` or `OUTSIDEBELOW`.
+- `OUTSIDE` and `OUTSIDEABOVE` both remove a heading from the inline flow (attempt 3).
+- A hidden field's `STARTCOL` does not disable field balancing (attempt 3).
+- A Suitelet form is server-rendered; a client script cannot inject fields; re-rendering
+  would discard chosen files; DOM manipulation was rejected in Phase 0 and stays rejected.
+- Hand-written markup with raw `<input type="file">` would trade the one upload mechanism
+  verified by experiment for one there is evidence against.
+
+### If this does not work
+
+**Then we accept what the platform gives and stop.** The feature is correct: the right files
+are uploaded, saved, published, linked and sent, against the right slots, with the right
+validation. It would only look untidy — fields in three columns with the headings gathered
+above them, rather than three stacked sections.
+
+That is a cosmetic fault on an internal form used by a handful of people, and it has now
+consumed four attempts. It is not worth a fifth, and it is certainly not worth trading a
+proven upload path for a prettier one.
+
+There is exactly **one** one-liner left, and it is the client's call whether to spend it:
+drop the headings to `FieldLayoutType.NORMAL` with no break type, so they sit inline in the
+flow as ordinary fields. If balancing is genuinely off by then, a single-column flow would
+carry them into position between their sections; the cost is that they would no longer be
+guaranteed full width. I have not done this, because it is a change of approach rather than
+the fix requested, and because it is only worth trying if attempt 4 has already proved that
+balancing is off.
+
+**263 assertions across eight suites, all passing.** The harness proves the break type now
+sits on Send As and on nothing else, and that Send As is genuinely the first field in the
+column flow. It cannot prove what the renderer does with it.
