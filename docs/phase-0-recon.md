@@ -1,7 +1,8 @@
 # NS-Design-Email — Phase 0: reconnaissance and attachment spike
 
 Status: **complete.** Part 1 answered from the committed reference source; Part 2
-answered from documentation.
+answered from documentation; the Phase 0 decisions recorded. One question remains open,
+and `spike/` exists to answer it.
 Date: 2026-09-16
 Nothing has been built. No implementation code exists in this repository.
 
@@ -518,43 +519,207 @@ Better mechanisms, and why none is recommended for Phase 1:
 
 ---
 
-## Open questions for the client — consolidated
+## Decisions
 
-Phase 0 resolved most of the original list. What remains:
+Settled. The reasoning is recorded alongside each choice, because the reasoning is what
+tells a later reader whether changing it is safe. Where a decision was taken *against* an
+obvious-looking alternative, the alternative and why it was rejected are recorded too —
+several of these will otherwise look like oversights and get "fixed".
 
-**Blocking Phase 1 design**
+### Button visibility
 
-1. **Real attachment sizes.** How large are typical CAD drawing PDFs, and how many go
-   out at once? Ten real examples with their file sizes is enough. This decides whether
-   Send Design attaches or links, and it is not answered by "it works by hand today" —
-   see Q2.
-2. **Sandbox test: do multiple `FILE` fields on one Suitelet form all arrive in
-   `request.files`?** A throwaway Suitelet with three `FILE` fields that logs the keys
-   it receives. If they do not, the design falls back to base64 (Q3) and Phase 1 is a
-   materially bigger job.
+`beforeLoad`, **VIEW mode only**, and only when `entitystatus` is **Won**.
 
-**Answerable at any point before Phase 1 ships**
+**VIEW only** because the Suitelet re-reads the Opportunity from the database. A user who
+has just changed the project engineer or the value proposition and not saved would
+otherwise get an email authored by the wrong person, carrying the wrong name and phone in
+the body — and nothing anywhere would say so. The failure is silent and lands in front of
+a customer. Removing EDIT removes the whole class. Send Quote shows its button in EDIT
+(Part 1a); this deliberately departs from that precedent.
 
-3. Is there a **project-engineer phone override field** on the Opportunity, equivalent
-   to `custbody_sales_rep_phone` for the sales rep? If not, the PE's phone comes from
-   the Employee record's `phone` and nothing else.
-4. Which **folder** do uploaded drawings go to? The value arrives as a script parameter;
-   the client supplies the folder, not the ID in source.
-5. **Retention** — are saved drawings kept after a successful send, or deleted?
-6. **Orphan handling** — if the save succeeds and the send then fails, remove the saved
-   files or leave them?
-7. Should the Send Design button appear in **EDIT** mode? Send Quote's does, and it
-   reads saved state, so unsaved edits are silently ignored (Part 1a).
-8. Does this repository represent **Sandbox or Production**? Still outstanding from
-   Phase 0, and it needs settling before any environment-specific value is committed.
+**Won only** because drawings do not exist before an order.
 
-**Resolved since the Phase 0 brief**
+**No sub-status condition**, and this is the part most likely to be "tidied" later.
+Drawings get resent after a redraw, when a customer loses them, when a builder wants a
+copy months afterwards — by which time the project has moved well past Design Complete. A
+sub-status gate would hide the button exactly when someone most needs it, and they would
+fall back to the native email from the central mailbox, which is the behaviour this
+feature exists to remove. Every hidden button is an invitation to go round the system.
 
-- Saving uploads to the File Cabinet is **approved**, which removes the risk in Q1.
-- The drawings are **not** already in the File Cabinet, so the upload path is real.
-- All of Part 1 — the reference source arrived and is committed under `reference/`.
+**Acceptable statuses arrive via a script parameter**, so tightening the rule later is a
+field edit rather than a redeployment. No numeric internal IDs in source.
+
+### Sender resolution
+
+Default:
+
+- value proposition is in the "sales rep default" parameter list → **sales rep**
+- otherwise → **project engineer** (`custbody_pe`)
+- project engineer blank → **sales rep**, regardless of value proposition
+
+**The user can override the default on the form.** The default is a starting position, not
+a decision made for them — which is the substantive departure from Send Quote, where the
+author is derived and never surfaced (Part 1c).
+
+`custbody_pe` is List/Record → Employee with Store Value ticked, so an employee internal
+ID is available for `email.send`'s `author`. `custbody_value_proposition` is List/Record →
+`customlist_value_proposition` and applies to the Opportunity only; its internal IDs
+arrive via the script parameter, never in source.
+
+### Sender contact details — source
+
+Read the sender's email and phone from the **Employee** record: `email` and
+**`officephone`**.
+
+**Do not read the Opportunity override fields** `custbody_pe_phone` or
+`custbodycustbody_pe_email`, and do not fall back to them.
+
+One source of truth. The employee record is maintained once per person and is correct on
+every Opportunity thereafter. A per-Opportunity copy has to be right thousands of times
+over, and drifts silently the moment someone changes desk or number — every historical
+record keeps the stale value, and nothing flags it.
+
+> Worth knowing before the first send: **`officephone` and `phone` are different fields
+> on the Employee record**, and Send Quote reads `phone` (Part 1b). Anyone whose number
+> is recorded only in `phone` will show **no phone at all** in a design email. That is
+> the visible gap working as designed — but if it turns out to be most of the team, the
+> fix is to populate `officephone` on the employee records, not to add a fallback here.
+> Worth a quick look at the employee data before go-live.
+
+If `officephone` is blank, **drop the phone clause** rather than substituting the
+Opportunity field. A visible gap gets fixed on the employee record, which fixes it
+everywhere at once. A quietly-substituted stale number never gets fixed at all.
+
+> **`custbodycustbody_pe_email` has a doubled prefix.** That is the **stored field ID**,
+> not a typo in this document. Someone typed `custbody_pe_email` into the ID box and
+> NetSuite prepended `custbody` anyway. It cannot be renamed, only replaced. It is
+> **deliberately unused** here. Recorded so that nobody reading this file later corrects
+> it to `custbody_pe_email` and goes looking for a field that does not exist — and so that
+> its absence from the code is understood as a decision rather than an omission.
+
+### Sender contact details — presentation
+
+**Project engineer:** role label "Project Engineer"; the body shows the shared address
+**`design@nu-heat.co.uk`** — held as a **constant in config, not a literal inside the
+template string** — and the PE's own phone.
+
+**Sales rep:** role label "Account Manager"; their own email and phone.
+
+> The PE case **deliberately authors as the PE while printing a shared address.** Replies
+> reach the PE, because `author` is the PE's employee record; the printed contact is the
+> team's. This is intentional, it is flagged for a future iteration, and it must not be
+> "fixed" into consistency by someone who notices the mismatch.
+
+**No branded fallbacks.** Send Quote falls back to `'Your Account Manager'`,
+`info@nu-heat.co.uk` and `01404 540604` when the employee load fails (Part 1b) — and,
+because of the `safeLog('warn')` defect, does so silently. Those values would be actively
+wrong for a project engineer. If the phone is blank the clause is dropped:
+*"contact your Project Engineer, NAME, via design@nu-heat.co.uk."* reads correctly. A
+wrong number does not.
+
+### Email fields
+
+**Ordinary visible NetSuite fields** for To, CC and BCC.
+
+Do **not** copy Send Quote's inline-HTML-plus-hidden-field pattern. Its sync script writes
+`hidden.value = visible.value` straight to the DOM, while `saveRecord` validates via
+`rec.getValue()`, which reads NetSuite's client-side model. The two can disagree, so
+validation can pass on a stale value while the POST carries a different one — and the
+server-side `parseEmails` validates nothing at all (Part 1d). The styled grey box is not
+worth a validation bypass.
+
+### Contact dropdown
+
+Keyed on **contact internal ID**, not email address.
+
+Send Quote keys its options on the email address, so every contact without one gets
+`value: ''` — the same value as the `-- Select a contact --` placeholder. Those contacts
+are unselectable, and selecting them does nothing at all (Part 1d). Keying on the ID and
+looking the email up on selection removes the collision.
+
+### File Cabinet
+
+Uploaded drawings **are saved**, to a folder whose internal ID arrives via a **script
+parameter**.
+
+Never hard-coded. `nuheat_master_proposal.js` carries `FOLDER_ID = 26895192` in source,
+which is exactly the failure this rule prevents: the value is environment-specific, and it
+is wrong the moment the script runs in the other account.
+
+### Attachment size
+
+**Total size is not a design constraint.** The team already splits into several emails when
+the total is large, and will continue to. The 15 MB per-message ceiling is therefore a
+thing to be aware of, not a thing to engineer around.
+
+**A single file over 10 MB cannot be split that way**, and `file.save()` throws
+`SSS_FILE_CONTENT_SIZE_EXCEEDED`. So: **check each file's size before saving** and refuse
+with a message naming the file and stating the limit. The user then compresses or splits
+it, rather than filing a bug against a raw NetSuite error they cannot act on.
+
+This is also where the native UI stops being a guide — the Communication tab upload does
+not go through `file.save()` and is not subject to the 10 MB ceiling, so a drawing that
+attaches by hand today can still be refused here (Part 2, Q2).
+
+### Email template
+
+Template 3334's HTML is **lifted into the script** with `{{MERGE_TAG}}` placeholders,
+following Send Quote's approach (`buildEmailBody`, Part 1d).
+
+It cannot be used as a NetSuite template because its merge fields bind to the **CAD
+Worklist custom record, which is being retired.**
+
+Accepted trade-off, recorded deliberately: **marketing can no longer edit this email
+without a code change.** May be revisited later — most plausibly by rebuilding the
+template against fields that still exist, once the CAD Worklist retirement has landed.
 
 ---
+
+## Open questions for the client — consolidated
+
+The Decisions section above settles most of what was open. What remains:
+
+**Blocking Phase 1**
+
+1. **Run the multipart spike.** `spike/` contains a throwaway Suitelet for Sandbox that
+   answers one question: do three `FILE` fields in one POST all arrive in
+   `request.files`? If they do not, Phase 1 falls back to base64 (Q3) and is a materially
+   bigger job. Deployment steps are in `spike/README.md`.
+
+**Needed as Phase 1 inputs, not blocking the design**
+
+2. **Template 3334's HTML.** The decision is to lift it into the script with merge-tag
+   placeholders; the markup itself is not yet in this repository.
+3. **Script parameter values** — the File Cabinet folder for uploaded drawings, the
+   acceptable `entitystatus` values, and the value-proposition IDs that default to the
+   sales rep. All arrive as parameters, so these are configuration to be supplied at
+   deployment rather than anything committed.
+4. **Retention** — are saved drawings kept after a successful send, or deleted?
+5. **Orphan handling** — if the save succeeds and the send then fails, are the saved
+   files removed or left?
+6. **What happens when both the project engineer and the sales rep are blank?** The
+   resolution rule falls through to the sales rep when `custbody_pe` is empty, but does
+   not say what to do when neither is set. See the note below.
+7. Does this repository represent **Sandbox or Production**? Outstanding since Phase 0,
+   and it needs settling before any environment-specific value is committed.
+
+**Resolved**
+
+- Button visibility, sender resolution and override, contact-detail source and
+  presentation, email field pattern, contact dropdown keying, File Cabinet saving,
+  attachment-size handling, and the email template approach — all in Decisions above.
+- Whether a PE phone override exists is now **moot**: the override fields are
+  deliberately unused, and the phone comes from the Employee record's `officephone` or
+  is omitted.
+- Whether the button appears in EDIT mode — **no**, VIEW only.
+- Total attachment size is **not** a design constraint; only the per-file 10 MB ceiling
+  is enforced.
+- Saving uploads to the File Cabinet is approved; the drawings are not already there, so
+  the upload path is real.
+- All of Part 1 — the reference source is committed under `reference/`.
+
+---
+
 ## Sources
 
 - [N/email Module](https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_4358681681.html)
