@@ -5,9 +5,13 @@
  *
  * @name        Design Send - Send Design Suitelet
  * @description Builds the Send Design form for an Opportunity (sender, recipients and
- *              up to five drawings), then saves the drawings to the File Cabinet and
- *              sends the installation-drawings email from the chosen sender.
- * @version     1.0.0
+ *              up to ten documents), then saves them to the File Cabinet, publishes them
+ *              and sends the installation-drawings email from the chosen sender.
+ *
+ *              From 1.6.0 the GET renders a hand-written HTML page rather than a
+ *              serverWidget form. See docs/phase-2-links.md, attempt 5 - in particular
+ *              the multipart upload risk that change reintroduces.
+ * @version     1.6.0
  *
  * Script ID:      customscript_dsn_sl_send_design
  * Deployment ID:  customdeploy_dsn_sl_send_design

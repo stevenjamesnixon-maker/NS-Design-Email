@@ -788,7 +788,11 @@ Kept so nobody repeats any of it.
 | 1 | 1.2.0 | `OUTSIDEABOVE` on headings, no break type | Sections still shared columns. A layout type says where a field sits, not that a row begins |
 | 2 | 1.4.0 | `OUTSIDEABOVE` + row layout types on every field | No change to the column flow. Headings still placed by the balancer |
 | 3 | 1.5.0 | `OUTSIDE` + `STARTROW` break on headings; `STARTCOL` on a **hidden** field | Headings render full width and stacked — but **all three collect at the top of the form**, detached from their sections. Fields still flow in three columns: balancing was **not** disabled from a hidden field |
-| 4 | 1.5.1 | `STARTCOL` moved to **Send As**, the first visible field | *To be observed* |
+| 4 | 1.5.1 | `STARTCOL` moved to **Send As**, the first visible field | Not enough. The form still did not stack |
+| 5 | 1.6.0 | **The native form was abandoned.** The GET now writes a hand-written HTML page with raw `<input type="file">` controls | **Layout correct.** Sections stack, the ten documents render as a real four-column table with a header row |
+
+Attempt 5 was made by the client directly in NetSuite and mirrored into the repo; it did
+not come through this session.
 
 Established along the way, and not to be re-derived:
 
@@ -798,6 +802,7 @@ Established along the way, and not to be re-derived:
   `OUTSIDEABOVE` or `OUTSIDEBELOW`.
 - `OUTSIDE` and `OUTSIDEABOVE` both remove a heading from the inline flow (attempt 3).
 - A hidden field's `STARTCOL` does not disable field balancing (attempt 3).
+- `STARTCOL` on the first visible field does not disable it either (attempt 4).
 - A Suitelet form is server-rendered; a client script cannot inject fields; re-rendering
   would discard chosen files; DOM manipulation was rejected in Phase 0 and stays rejected.
 - Hand-written markup with raw `<input type="file">` would trade the one upload mechanism
@@ -825,3 +830,107 @@ balancing is off.
 **263 assertions across eight suites, all passing.** The harness proves the break type now
 sits on Send As and on nothing else, and that Send As is genuinely the first field in the
 column flow. It cannot prove what the renderer does with it.
+
+
+---
+
+## Attempt 5 — what actually fixed the layout, and what it costs
+
+`dsn_sl_send_design.js` **1.5.1 → 1.6.0**, edited by the client in NetSuite and mirrored
+into the repo. It is on `claude/phase-2-document-links`, not on `main`.
+
+### What changed
+
+**The GET no longer builds a serverWidget form.** `showForm` writes a complete
+hand-written HTML document with `context.response.write`, containing:
+
+- a real `<table>` with a `<thead>` of Document / File / Category / Button Label, and a
+  `<colgroup>` fixing the column widths at 12% / 32% / 24% / 32%;
+- ten rows of raw `<input type="file">`, `<select>` and `<input type="text">`, keeping the
+  existing `name` attributes exactly (`custpage_dsn_file_7` and so on);
+- `<section>` blocks for Email, Documents and Options, stacked by ordinary CSS;
+- its own inline JavaScript for the two client-side behaviours — filling To from the chosen
+  contact (via `data-email` attributes rather than the hidden LONGTEXT map) and pre-filling
+  a button label from its category;
+- a submit guard that **disables empty file inputs** before posting, so unused slots do not
+  produce empty multipart parts;
+- categories read at render time from `customlist_dsn_link_category` by script ID.
+
+Supporting changes: the previous native builder is kept as `showNativeFormLegacy` with no
+callers; `disableFieldBalancing` is now uncalled; `setRowLayout` was rewritten to apply
+`OUTSIDE` + a `STARTROW`/`NONE` **break** type and to throw rather than degrade — but it is
+only reachable from the legacy function, so that rewrite is inert. Field widths were
+narrowed (email 60→32, label 45→35), which now only affects the legacy path. The rest of
+the diff is comment and whitespace reflow.
+
+**Unchanged:** every field name, the whole POST path, validation, size checks, file naming,
+publishing, linking, the email template, and both result pages (which are still serverWidget
+forms, so `dsn_cs_send_design.js` is still used for their Cancel button).
+
+### Why it works
+
+Because it stops asking serverWidget to lay the form out. Attempts 1 to 4 were all trying to
+persuade NetSuite's column balancer to produce a single stacked flow; attempt 5 renders its
+own markup, where stacking is just CSS. That is the whole explanation, and it is deducible
+directly from the diff.
+
+### What this does NOT establish — correcting the record carefully
+
+The brief for this write-up asked whether attempt 5 disproves the earlier conclusion that
+serverWidget cannot place a full-width heading inline between groups of fields.
+
+**It does not.** Attempt 5 does not place a heading inline with serverWidget; it does not
+use serverWidget for the form at all. The conclusion from attempt 3 therefore stands
+untested rather than refuted — no evidence has been added on either side. Recording it as
+"disproved" would be inventing a result the code does not contain.
+
+### The cost, and the thing that must be checked before this ships
+
+**Attempt 5 is the approach Phase 2c explicitly ruled out**, and the reason it was ruled out
+has not gone away:
+
+- The Sandbox spike proved that **several NATIVE FILE fields survive one POST**, including
+  with gaps between filled slots. That evidence is about NetSuite-rendered fields.
+- The only source found on **hand-rolled multipart POSTs in a Suitelet** claims NetSuite
+  does not parse them. Nothing has disproved that.
+
+**"The form lays out correctly" is a GET-side observation.** It says nothing about whether
+an upload parses, because no file has been posted to prove it. The code itself carries the
+author's own note: *"Sandbox verification required for multipart handling and deployment
+security."*
+
+So before this goes anywhere near Production, a **real send** must be confirmed in Sandbox:
+
+1. One file in one slot — does `request.files` receive it?
+2. Three files in slots 1, 2 and 3.
+3. **Non-sequential slots** — 1 and 9, with the gap the submit guard is there to handle.
+4. That the resulting email carries the right links against the right labels.
+
+If uploads do not parse, the fallback is attempt 4's native form, which is why the legacy
+builder was kept. If they do parse, that is a **new and valuable finding** that contradicts
+the only source we had, and it belongs in this document as firmly as the original spike.
+
+### Secondary points worth a decision
+
+- **`showNativeFormLegacy` is ~160 lines of unreachable code.** Justified while the upload
+  question is open; it should be deleted once a real send is confirmed, or restored if it is
+  not. It should not be left indefinitely.
+- **`setRowLayout` now throws instead of degrading.** Inert today because only the legacy
+  path calls it, but if that path is ever revived, a field type refusing a layout will take
+  the form down rather than stacking — the opposite of the guarded behaviour it had.
+- **The page has no NetSuite chrome.** A raw HTML response loses the usual header and
+  navigation. That may well be fine for a task-focused page reached from a button, but it is
+  a change in feel worth noticing rather than discovering.
+
+### Harness status against 1.6.0
+
+The POST pipeline is fully green: slot 7 alone, non-sequential slots 1 and 9, label fallback
+to category, the 10 MB refusal saving nothing, attach-too, `relatedRecords`, publishing and
+linking — all still pass, and `node --check` passes on all six files.
+
+**The GET-side suites now fail, and they are stale rather than wrong.** They assert on
+serverWidget fields — layout types, break types, field ordering — for a form that no longer
+exists on the GET path. Those assertions were testing attempt 4's mechanism, and attempt 5
+removed it. They have deliberately **not** been rewritten to match: the tests should follow a
+decision about whether 1.6.0 stays, not be quietly reshaped around it while its central
+question is still open.

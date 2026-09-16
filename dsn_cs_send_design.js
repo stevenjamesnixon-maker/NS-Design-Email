@@ -7,7 +7,7 @@
  * @description Client script for the Send Design Suitelet form. Two jobs: fill the To
  *              field when a contact is chosen, and return to the Opportunity when
  *              Cancel is pressed.
- * @version     1.0.0
+ * @version     1.2.0
  *
  * NO SCRIPT RECORD.
  *   Attached to the form by dsn_sl_send_design.js via form.clientScriptModulePath, and

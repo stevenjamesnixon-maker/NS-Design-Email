@@ -6,7 +6,7 @@
  * @description The installation-drawings email body, lifted from NetSuite email
  *              template 3334 and rendered here with merge tags this project
  *              substitutes itself.
- * @version     1.0.0
+ * @version     1.4.0
  *
  * WHY THE HTML LIVES IN A SCRIPT
  *   Template 3334 cannot be used as a NetSuite template because its merge fields
