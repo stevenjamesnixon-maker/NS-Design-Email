@@ -1040,3 +1040,96 @@ injecting the hostile employee data it claimed to check; the test was fixed to i
 not relaxed.
 
 **249 assertions across eight suites, all passing.**
+
+
+---
+
+## Template 1.4.1 — duplicated CTA buttons fixed
+
+`dsn_email_template.js` **1.4.0 → 1.4.1**. Template only; `dsn_sl_send_design.js` and every
+other script are unchanged.
+
+### The symptom and the cause
+
+Every document button rendered **twice** — two "Design drawings", two "Plant room info" —
+each pair tight together with the normal 12px gap only between pairs. Seen in NetSuite's own
+message view (`crmmessage.nl`).
+
+Each button is emitted twice by design, and must be: Outlook desktop's Word engine cannot
+render the anchor-wrapped table the other clients get, so it needs its own. The two halves
+were meant to be mutually exclusive. They were not:
+
+- the non-Outlook half sat in a **downlevel-revealed** comment,
+  `<!--[if !mso]><!-- --> … <!--<![endif]-->` — correct, and unchanged;
+- the Outlook half sat in `<div style="display:none; mso-hide: none;">` — hidden from
+  everyone else **only by an inline style**.
+
+Anything that strips or ignores inline `display` shows both. NetSuite's message viewer does.
+
+### The fix
+
+The Outlook half is now wrapped in a **downlevel-hidden conditional comment**:
+
+```
+<!--[if mso]>
+  … the Outlook table, byte for byte as it was …
+<![endif]-->
+```
+
+A non-Outlook client sees one HTML comment and renders nothing, whatever it does with CSS.
+Outlook desktop evaluates the condition and renders the contents. Nothing inside the table
+changed — only its wrapper.
+
+**Chosen over the alternatives deliberately:** `mso-hide:all` on the other half, or a CSS
+class, would both be just as strippable. Only a comment is invisible to a client that
+ignores CSS entirely. The JSDoc now says this, because the previous comment described the
+`display:none` div as *the* Outlook fallback and a future reader would have restored it.
+
+### Two buttons had this defect, not one
+
+The **READ NOW** button in the lifted template body used the same pattern and was still
+being rendered — Phase 2a removed the Confirm Drawings block but not this one. It is fixed
+the same way. That is the only other place the pattern occurred; the `gte mso 9` ghost
+tables, the `<head>` styles, copy, colours and widths are untouched.
+
+### Why a hostile label cannot break it
+
+Inside a conditional comment, an interpolated `-->` or `<!--` would end the comment early
+and spill Outlook markup into every client. It cannot happen: `config.escapeHtml` escapes
+both `<` and `>`, so `-->` can only ever reach the markup as `--&gt;` and `<!--` as
+`&lt;!--`. Verified, and asserted in the test with a label of
+`End --> start <!-- <b>"x"</b> & 'y'`. No second escape was added.
+
+### Tests
+
+**This is the first committed test in the repository** — `test/template-cta-duplication.js`,
+run with `node test/template-cta-duplication.js`. Everything before it lived in a session
+scratchpad, which is why earlier write-ups describe "a harness under the session scratchpad".
+It follows that same style: stub `define` and the NetSuite modules, load the real module,
+assert with `ok()`, exit non-zero on failure. No runner, no dependencies.
+
+It simulates each client by parsing comments the way a browser does — scan for `<!--`, drop
+through the next `-->` — rather than matching named blocks, which is faithful to both
+conditional forms at once and is what makes the `-->` case meaningful.
+
+| Run | Result |
+|---|---|
+| `main` (1.4.0) | **17 passed, 12 failed** |
+| this branch (1.4.1) | **29 passed, 0 failed** |
+
+A sample two-document render is at `docs/samples/duplicate-buttons-1.4.1.html` for opening
+in a browser and mailing to Gmail and Outlook.
+
+Four assertions in the pre-existing scratchpad suites checked for `display:none; mso-hide:
+none` — the exact mechanism this replaces. They were repointed at the new wrapper, making
+the same claim (both halves present) about the new markup. Full run afterwards: **278
+assertions across nine suites, all passing.**
+
+### One correction to the brief
+
+The brief expected test 1 (non-Outlook view, styles intact) to pass on `main` and only
+test 2 (styles stripped) to fail. **Both fail on `main`**, and that is right: on 1.4.0 the
+duplicate is in the markup either way. Stripping styles is what makes the second copy
+*visible*, not what makes it *present* — a text-counting test sees it regardless. Test 2 is
+still the one that matches the reported symptom; it is just not the only one that catches
+the bug.

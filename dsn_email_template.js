@@ -6,7 +6,7 @@
  * @description The installation-drawings email body, lifted from NetSuite email
  *              template 3334 and rendered here with merge tags this project
  *              substitutes itself.
- * @version     1.4.0
+ * @version     1.4.1
  *
  * WHY THE HTML LIVES IN A SCRIPT
  *   Template 3334 cannot be used as a NetSuite template because its merge fields
@@ -35,6 +35,13 @@
  *   has no office phone. That fallback deliberately differs from the footer's, which
  *   drops its phone instead - see buildDeliveryContact for why.
  *
+ * 1.4.1 - DUPLICATED CTA BUTTONS FIXED
+ *   Every document button, and the READ NOW button, rendered twice in clients that strip
+ *   inline styles - including NetSuite's own message view. The Outlook fallback half was
+ *   hidden only by <div style="display:none; mso-hide: none;">. Both are now wrapped in a
+ *   downlevel-hidden <!--[if mso]> ... <![endif]--> conditional comment instead, which a
+ *   client cannot un-hide by ignoring CSS. No other markup changed.
+ *
  * PHASE 2 TAGS
  *   {{INTRO_COPY}}      replaces the fixed sentence "Please find your bespoke
  *                       installation drawings attached", which stops being true once
@@ -55,7 +62,7 @@ function (config) {
 
     'use strict';
 
-    var TEMPLATE_VERSION = '1.4.0';
+    var TEMPLATE_VERSION = '1.4.1';
 
     /**
      * The phrase removed wholesale when the sender has no phone. Must match the
@@ -558,7 +565,7 @@ function (config) {
         '</span>',
         '</a>',
         '<!--<![endif]-->',
-        '<div style="display:none; mso-hide: none;">',
+        '<!--[if mso]>',
         '<table cellpadding="0" cellspacing="0" border="0" bgcolor="#ffb500" class="fluid-on-mobile" style="border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">',
         '<tr>',
         '<td align="center" style="padding:15px;">',
@@ -572,7 +579,7 @@ function (config) {
         '</td>',
         '</tr>',
         '</table>',
-        '</div>',
+        '<![endif]-->',
         '</td>',
         '</tr>',
         '</table>',
@@ -880,16 +887,23 @@ function (config) {
     /**
      * Builds the CTA buttons for {{DOCUMENT_LINKS}}.
      *
-     * The markup is copied from the CONFIRM DRAWINGS button that this template used to
-     * carry (removed in Phase 2a), INCLUDING its MSO conditional pair:
+     * Each button is emitted TWICE, in two mutually exclusive conditional comments:
      *
-     *   <!--[if !mso]><!-- -->   ... anchor-wrapped table, for everything else
-     *   <!--<![endif]-->
-     *   <div style="display:none; mso-hide: none;">  ... the Outlook fallback
+     *   <!--[if !mso]><!-- -->  ... anchor-wrapped table, for every client but Outlook
+     *   <!--<![endif]-->        (downlevel-REVEALED: non-Outlook clients render it)
+     *   <!--[if mso]>           ... the Outlook desktop version
+     *   <![endif]-->            (downlevel-HIDDEN: everyone else sees a comment)
      *
-     * Both halves are required. Without the conditional, Outlook renders BOTH and the
-     * button appears twice - which is why the pattern is in the original template, and
-     * why it is reproduced here rather than simplified.
+     * Both halves are required. Outlook desktop cannot render the first - its Word engine
+     * needs its own table - and no other client should render the second.
+     *
+     * 1.4.1: the Outlook half used to be wrapped in
+     * <div style="display:none; mso-hide: none;">, which hid it from other clients only by
+     * an inline style. Anything that strips or ignores inline display showed BOTH halves,
+     * so every document button appeared twice - visible in NetSuite's own message view
+     * (crmmessage.nl) and reported in webmail. A conditional comment is not a style: a
+     * client that ignores CSS entirely still sees only a comment. Do NOT replace it with a
+     * display:none div, an mso-hide rule, or a CSS class; all three can be stripped.
      *
      * @param {Array<Object>} documents  [{ label, url }]
      * @returns {string} HTML, or '' when there are no documents
@@ -938,8 +952,11 @@ function (config) {
             html.push('</a>');
             html.push('<!--<![endif]-->');
 
-            // Outlook only.
-            html.push('<div style="display:none; mso-hide: none;">');
+            // Outlook desktop only. Inside a downlevel-HIDDEN conditional comment, so every
+            // other client sees a comment and renders nothing, whatever it does with styles.
+            // Do NOT go back to a display:none div: NetSuite's message view and some webmail
+            // strip inline display, and every button then shows twice (fixed in 1.4.1).
+            html.push('<!--[if mso]>');
             html.push('<table cellpadding="0" cellspacing="0" border="0" width="' + CONTENT_WIDTH_PX + '" bgcolor="#ffb500" class="' + FULL_WIDTH_CLASSES + '" style="width:' + CONTENT_WIDTH_PX + 'px;max-width:100%;border-radius:5px;border-collapse:separate !important;background-color:#ffb500;">');
             html.push('<tr>');
             html.push('<td align="center" style="padding:15px;text-align:center;word-wrap:break-word;">');
@@ -953,7 +970,7 @@ function (config) {
             html.push('</td>');
             html.push('</tr>');
             html.push('</table>');
-            html.push('</div>');
+            html.push('<![endif]-->');
 
             html.push('</td>');
             html.push('</tr>');
